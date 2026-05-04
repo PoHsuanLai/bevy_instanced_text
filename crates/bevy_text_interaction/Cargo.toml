@@ -26,6 +26,7 @@ bevy = { version = "0.17", default-features = false, features = [
     "bevy_mesh",
     "bevy_camera",
     "bevy_input_focus",
+    "bevy_picking",
 ] }
 
 ropey = "1.6"

@@ -1,11 +1,17 @@
-//! Shared text view interactions — scroll, selection, copy.
+//! Shared text-view interactions — scroll, selection, copy.
 //!
-//! These systems work on any entity with `TextView` + `TextViewState` + `TextViewViewport`.
-//! Used by the code editor (via delegation) and standalone text views (chat, logs).
+//! Implemented as observers on `Pointer<…>` events (from `bevy_picking`)
+//! and `FocusedInput<KeyboardInput>` (from `bevy_input_focus`), routed by
+//! the custom backend in [`crate::picking`]. The polling systems that used
+//! to live here (manual cursor-rect hit-testing) are gone — picking +
+//! focus dispatch handle entity routing for us.
 
-use bevy::input::mouse::MouseWheel;
+use bevy::input::keyboard::{KeyCode, KeyboardInput};
+use bevy::input_focus::{FocusedInput, InputFocus};
+use bevy::input::ButtonState;
+use bevy::picking::events::{Drag, Pointer, Press, Release, Scroll};
+use bevy::picking::pointer::PointerButton;
 use bevy::prelude::*;
-use bevy::window::PrimaryWindow;
 use ropey::Rope;
 
 use bevy_text_engine::{DisplayLayout, FontConfig, TextView, TextViewState, TextViewViewport};
@@ -13,7 +19,7 @@ use bevy_text_engine::{DisplayLayout, FontConfig, TextView, TextViewState, TextV
 use crate::components::{ScrollConfig, TextViewDragState, TextViewSelectionState};
 
 // =============================================================================
-// Utilities
+// Utilities (kept public for hosts that build their own click handlers)
 // =============================================================================
 
 /// Convert screen coordinates (viewport-local, 0,0 at top-left) to a character
@@ -45,10 +51,6 @@ pub fn screen_to_char_pos(
 
     let line_start_char = rope.line_to_char(display_row);
 
-    // Shaped path: ask the layout where pixel `relative_x` falls inside the row,
-    // then convert byte offset → char offset via the rope. Only takes this path
-    // when `display_row` falls within the layout's visible window — clicks above
-    // or below scroll fall through to the column math fallback.
     if let Some(layout) = layout {
         if let Some(byte_in_line) = layout.byte_at_x(display_row as u32, relative_x) {
             let line_start_byte = rope.line_to_byte(display_row);
@@ -83,16 +85,16 @@ pub fn copy_selection(sel: &TextViewSelectionState, tv: &TextViewState) -> bool 
 }
 
 // =============================================================================
-// Systems
+// Observers (registered globally by `TextInteractionPlugin`)
 // =============================================================================
 
-/// Mouse wheel scroll for all `TextView` entities.
-/// Hit-tests against each viewport to only scroll the hovered view.
+/// Pointer scroll observer for `TextView` entities.
 ///
-/// Per-view scroll behaviour: `FontConfig` is per-entity. `ScrollConfig` is
-/// optional — `CodeEditor` entities provide one via their `#[require]`
-/// cascade; standalone `TextView`s (chat, logs) fall back to defaults.
-pub fn handle_text_view_scroll(
+/// Picking already routed this event to the entity under the cursor, so the
+/// hit-test loop the old `handle_text_view_scroll` did is gone — we just
+/// look up the target entity's components and apply the scroll.
+pub fn on_pointer_scroll(
+    trigger: On<Pointer<Scroll>>,
     mut views: Query<
         (
             &mut TextViewState,
@@ -102,67 +104,43 @@ pub fn handle_text_view_scroll(
         ),
         With<TextView>,
     >,
-    mut mouse_wheel_events: MessageReader<MouseWheel>,
-    windows: Query<&Window, With<PrimaryWindow>>,
 ) {
-    let Ok(window) = windows.single() else { return };
-    let Some(cursor_pos) = window.cursor_position() else {
+    let entity = trigger.event().entity;
+    let Ok((mut tv, viewport, font, scroll_cfg)) = views.get_mut(entity) else {
         return;
     };
 
-    // Collect events (can only iterate once)
-    let events: Vec<_> = mouse_wheel_events.read().cloned().collect();
-    if events.is_empty() {
+    let default_scroll = ScrollConfig::default();
+    let scroll_cfg = scroll_cfg.unwrap_or(&default_scroll);
+
+    let dy = trigger.event().y;
+    if dy.abs() <= 0.0 {
         return;
     }
 
-    let default_scroll = ScrollConfig::default();
-    for (mut tv, viewport, font, scroll_cfg) in views.iter_mut() {
-        let scroll_cfg = scroll_cfg.unwrap_or(&default_scroll);
-        // Hit-test: is the cursor within this viewport?
-        let vp_pos = viewport.hit_test_position;
-        let vp_rect = bevy::math::Rect::new(
-            vp_pos.x,
-            vp_pos.y,
-            vp_pos.x + viewport.width as f32,
-            vp_pos.y + viewport.height as f32,
-        );
+    let scroll_delta = dy * font.line_height * scroll_cfg.speed;
+    let line_count = tv.rope.len_lines();
+    let content_height = line_count as f32 * font.line_height;
+    let viewport_height = viewport.height as f32;
+    let max_scroll = (-(content_height - viewport_height + viewport.text_area_top)).min(0.0);
 
-        if !vp_rect.contains(cursor_pos) {
-            continue;
-        }
-
-        for event in &events {
-            if event.y.abs() > 0.0 {
-                let scroll_delta = event.y * font.line_height * scroll_cfg.speed;
-                let line_count = tv.rope.len_lines();
-                let content_height = line_count as f32 * font.line_height;
-                let viewport_height = viewport.height as f32;
-                let max_scroll =
-                    (-(content_height - viewport_height + viewport.text_area_top)).min(0.0);
-
-                if scroll_cfg.smooth {
-                    tv.target_scroll_offset += scroll_delta;
-                    tv.target_scroll_offset = tv.target_scroll_offset.min(0.0).max(max_scroll);
-                } else {
-                    tv.scroll_offset += scroll_delta;
-                    tv.scroll_offset = tv.scroll_offset.min(0.0).max(max_scroll);
-                }
-
-            }
-        }
+    if scroll_cfg.smooth {
+        tv.target_scroll_offset += scroll_delta;
+        tv.target_scroll_offset = tv.target_scroll_offset.min(0.0).max(max_scroll);
+    } else {
+        tv.scroll_offset += scroll_delta;
+        tv.scroll_offset = tv.scroll_offset.min(0.0).max(max_scroll);
     }
 }
 
-/// Mouse click + drag selection for all `TextView` entities.
+/// Pointer-press observer: focus the view and start a selection drag.
 ///
-/// Drag state is per-view; each entity tracks its own selection drag so two
-/// text views can be interacted with independently. On press, the hit view
-/// becomes the [`InputFocus`] target so keyboard input routes to it.
-pub fn handle_text_view_mouse(
+/// Only the primary button starts a selection. Position is taken from the
+/// hit data, which the picking backend reports in viewport-local coords.
+pub fn on_pointer_press(
+    trigger: On<Pointer<Press>>,
     mut views: Query<
         (
-            Entity,
             &mut TextViewSelectionState,
             &mut TextViewDragState,
             &TextViewState,
@@ -172,108 +150,141 @@ pub fn handle_text_view_mouse(
         ),
         With<TextView>,
     >,
-    mut input_focus: ResMut<bevy::input_focus::InputFocus>,
-    mouse_button: Res<ButtonInput<MouseButton>>,
-    windows: Query<&Window, With<PrimaryWindow>>,
+    mut input_focus: ResMut<InputFocus>,
 ) {
-    let Ok(window) = windows.single() else { return };
-    let Some(cursor_pos) = window.cursor_position() else {
+    if trigger.event().button != PointerButton::Primary {
+        return;
+    }
+    let entity = trigger.event().entity;
+    let Ok((mut sel, mut drag_state, tv, viewport, font, layout)) = views.get_mut(entity) else {
         return;
     };
 
-    // Handle release: clear drag flag on every view that thought it was dragging.
-    if mouse_button.just_released(MouseButton::Left) {
-        for (_, _, mut drag_state, _, _, _, _) in views.iter_mut() {
-            drag_state.is_dragging = false;
-        }
+    let local_pos = match trigger.event().hit.position {
+        Some(p) => Vec2::new(p.x, p.y),
+        None => return,
+    };
+
+    let char_pos = screen_to_char_pos(
+        local_pos,
+        &tv.rope,
+        layout.as_deref(),
+        tv.scroll_offset,
+        font,
+        viewport,
+        None,
+    );
+
+    sel.selection_start = Some(char_pos);
+    sel.selection_end = None;
+    drag_state.is_dragging = true;
+    drag_state.drag_start_pos = Some(char_pos);
+    drag_state.drag_start_scroll_offset = tv.scroll_offset;
+    // Reconstruct screen-space pointer position from hit + viewport origin.
+    drag_state.last_screen_pos = Some(viewport.hit_test_position + local_pos);
+    input_focus.set(entity);
+}
+
+/// Drag observer: extend the selection while the primary button is held.
+///
+/// Picking dispatches `Pointer<Drag>` to the entity that received the
+/// initial press, so this stays scoped to the view that started the drag
+/// even if the cursor moves out of its viewport.
+pub fn on_pointer_drag(
+    trigger: On<Pointer<Drag>>,
+    mut views: Query<
+        (
+            &mut TextViewSelectionState,
+            &mut TextViewDragState,
+            &TextViewState,
+            &TextViewViewport,
+            &FontConfig,
+            Option<&DisplayLayout>,
+        ),
+        With<TextView>,
+    >,
+) {
+    if trigger.event().button != PointerButton::Primary {
+        return;
+    }
+    let entity = trigger.event().entity;
+    let Ok((mut sel, mut drag_state, tv, viewport, font, layout)) = views.get_mut(entity) else {
+        return;
+    };
+    if !drag_state.is_dragging {
         return;
     }
 
-    // Handle press: hit-test each view; the one under the cursor begins a drag
-    // and acquires keyboard focus.
-    if mouse_button.just_pressed(MouseButton::Left) {
-        for (entity, mut sel, mut drag_state, tv, viewport, font, layout) in views.iter_mut() {
-            let vp_pos = viewport.hit_test_position;
-            let vp_rect = bevy::math::Rect::new(
-                vp_pos.x,
-                vp_pos.y,
-                vp_pos.x + viewport.width as f32,
-                vp_pos.y + viewport.height as f32,
-            );
+    // Resolve current pointer position in screen space from picking event.
+    let cursor_pos = trigger.event().pointer_location.position;
 
-            if !vp_rect.contains(cursor_pos) {
-                continue;
-            }
-
-            let local_pos = Vec2::new(cursor_pos.x - vp_pos.x, cursor_pos.y - vp_pos.y);
-            let char_pos = screen_to_char_pos(
-                local_pos,
-                &tv.rope,
-                layout.as_deref(),
-                tv.scroll_offset,
-                font,
-                viewport,
-                None,
-            );
-
-            sel.selection_start = Some(char_pos);
-            sel.selection_end = None;
-            drag_state.is_dragging = true;
-            drag_state.drag_start_pos = Some(char_pos);
-            drag_state.drag_start_scroll_offset = tv.scroll_offset;
-            drag_state.last_screen_pos = Some(cursor_pos);
-            input_focus.set(entity);
+    if let Some(last_pos) = drag_state.last_screen_pos {
+        if (cursor_pos - last_pos).length() < 2.0 {
+            return;
         }
-        return;
     }
 
-    // Handle drag — only the view that started the drag extends its selection.
-    if mouse_button.pressed(MouseButton::Left) {
-        for (_, mut sel, mut drag_state, tv, viewport, font, layout) in views.iter_mut() {
-            if !drag_state.is_dragging {
-                continue;
-            }
-            // Skip tiny movements to avoid jitter.
-            if let Some(last_pos) = drag_state.last_screen_pos {
-                if (cursor_pos - last_pos).length() < 2.0 {
-                    continue;
-                }
-            }
+    let local_pos = cursor_pos - viewport.hit_test_position;
+    let char_pos = screen_to_char_pos(
+        local_pos,
+        &tv.rope,
+        layout.as_deref(),
+        tv.scroll_offset,
+        font,
+        viewport,
+        Some(drag_state.drag_start_scroll_offset),
+    );
 
-            let vp_pos = viewport.hit_test_position;
-            let local_pos = Vec2::new(cursor_pos.x - vp_pos.x, cursor_pos.y - vp_pos.y);
-            let char_pos = screen_to_char_pos(
-                local_pos,
-                &tv.rope,
-                layout.as_deref(),
-                tv.scroll_offset,
-                font,
-                viewport,
-                Some(drag_state.drag_start_scroll_offset),
-            );
+    sel.selection_start = drag_state.drag_start_pos;
+    sel.selection_end = Some(char_pos);
+    drag_state.last_screen_pos = Some(cursor_pos);
+}
 
-            sel.selection_start = drag_state.drag_start_pos;
-            sel.selection_end = Some(char_pos);
-            drag_state.last_screen_pos = Some(cursor_pos);
-        }
+/// Release observer: clear the drag flag.
+pub fn on_pointer_release(
+    trigger: On<Pointer<Release>>,
+    mut views: Query<&mut TextViewDragState, With<TextView>>,
+) {
+    if trigger.event().button != PointerButton::Primary {
+        return;
+    }
+    let entity = trigger.event().entity;
+    if let Ok(mut drag_state) = views.get_mut(entity) {
+        drag_state.is_dragging = false;
     }
 }
 
-/// Copy selection on Cmd/Ctrl+C for `TextView` entities.
-pub fn handle_text_view_copy(
+/// Focused-keyboard observer: copy the selection on Cmd/Ctrl+C.
+///
+/// Replaces the global `Res<ButtonInput<KeyCode>>` poll with a routed
+/// `FocusedInput<KeyboardInput>` event, so only the focused text view's
+/// selection is copied. The Ctrl modifier check keys off
+/// `Res<ButtonInput<KeyCode>>` since `KeyboardInput` carries a single
+/// key per event.
+pub fn on_focused_keyboard(
+    trigger: On<FocusedInput<KeyboardInput>>,
     views: Query<(&TextViewSelectionState, &TextViewState), With<TextView>>,
     keyboard: Res<ButtonInput<KeyCode>>,
 ) {
+    let entity = trigger.event().focused_entity;
+    let Ok((sel, tv)) = views.get(entity) else {
+        return;
+    };
+
+    let event = &trigger.event().input;
+    if event.state != ButtonState::Pressed {
+        return;
+    }
+    if event.key_code != KeyCode::KeyC {
+        return;
+    }
     let ctrl = keyboard.pressed(KeyCode::SuperLeft)
         || keyboard.pressed(KeyCode::SuperRight)
         || keyboard.pressed(KeyCode::ControlLeft)
         || keyboard.pressed(KeyCode::ControlRight);
-
-    if ctrl && keyboard.just_pressed(KeyCode::KeyC) {
-        for (sel, tv) in views.iter() {
-            if copy_selection(sel, tv) {
-                break; // Only copy from first view with a selection
-            }
-        }
+    if !ctrl {
+        return;
     }
+
+    copy_selection(sel, tv);
 }
