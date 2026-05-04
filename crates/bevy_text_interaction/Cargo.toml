@@ -1,0 +1,32 @@
+[package]
+name = "bevy_text_interaction"
+version = "0.1.0"
+edition = "2021"
+authors = ["PoHsuanLai"]
+license = "MIT OR Apache-2.0"
+description = "Mouse + keyboard interaction (scroll, drag-select, copy) for bevy_text_engine TextView entities."
+repository = "https://github.com/PoHsuanLai/bevy_code_editor"
+keywords = ["bevy", "text", "interaction", "selection", "scroll"]
+categories = ["game-development"]
+
+[dependencies]
+# Text rendering primitives (TextView, TextViewState, TextViewViewport, FontConfig).
+bevy_text_engine = { path = "../bevy_text_engine" }
+
+# Match the editor's bevy feature set so this crate composes cleanly with it.
+bevy = { version = "0.17", default-features = false, features = [
+    "bevy_render",
+    "bevy_core_pipeline",
+    "bevy_asset",
+    "bevy_text",
+    "default_font",
+    "bevy_sprite",
+    "bevy_sprite_render",
+    "bevy_color",
+    "bevy_mesh",
+    "bevy_camera",
+    "bevy_input_focus",
+] }
+
+ropey = "1.6"
+arboard = "3.4"
