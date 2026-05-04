@@ -8,14 +8,16 @@
 use bevy::prelude::*;
 
 /// Selection state for a text view. Tracks character indices into the rope.
-#[derive(Component, Default, Debug, Clone)]
+#[derive(Component, Default, Debug, Clone, Reflect)]
+#[reflect(Component, Default, Debug)]
 pub struct TextViewSelectionState {
     pub selection_start: Option<usize>,
     pub selection_end: Option<usize>,
 }
 
 /// Per-view mouse drag tracking for text selection.
-#[derive(Component, Default)]
+#[derive(Component, Default, Reflect)]
+#[reflect(Component, Default)]
 pub struct TextViewDragState {
     pub is_dragging: bool,
     pub drag_start_pos: Option<usize>,
@@ -29,7 +31,8 @@ pub struct TextViewDragState {
 /// at different speeds or with smooth-vs-instant independently. The scroll
 /// system falls back to `ScrollConfig::default()` for entities that don't
 /// have one attached.
-#[derive(Component, Clone, Debug)]
+#[derive(Component, Clone, Debug, Reflect)]
+#[reflect(Component, Debug)]
 pub struct ScrollConfig {
     /// Scroll speed multiplier (lines per wheel notch).
     pub speed: f32,
