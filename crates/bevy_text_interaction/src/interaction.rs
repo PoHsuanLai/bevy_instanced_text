@@ -8,7 +8,7 @@ use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use ropey::Rope;
 
-use bevy_text_engine::{FontConfig, TextView, TextViewState, TextViewViewport};
+use bevy_text_engine::{DisplayLayout, FontConfig, TextView, TextViewState, TextViewViewport};
 
 use crate::components::{ScrollConfig, TextViewDragState, TextViewSelectionState};
 
@@ -18,9 +18,14 @@ use crate::components::{ScrollConfig, TextViewDragState, TextViewSelectionState}
 
 /// Convert screen coordinates (viewport-local, 0,0 at top-left) to a character
 /// position in the rope. Used for click-to-position and drag selection.
+///
+/// `layout` is consulted when available so proportional fonts hit-test
+/// correctly via shaped per-glyph advances; falls back to `font.char_width`
+/// column math otherwise.
 pub fn screen_to_char_pos(
     screen_pos: Vec2,
     rope: &Rope,
+    layout: Option<&DisplayLayout>,
     current_scroll_offset: f32,
     font: &FontConfig,
     viewport: &TextViewViewport,
@@ -31,10 +36,7 @@ pub fn screen_to_char_pos(
     let relative_y = screen_pos.y - viewport.text_area_top - scroll_offset;
 
     let line_height = font.line_height;
-    let char_width = font.char_width;
-
     let display_row = (relative_y / line_height).max(0.0) as usize;
-    let col = (relative_x / char_width).max(0.0) as usize;
 
     let line_count = rope.len_lines();
     if display_row >= line_count {
@@ -42,9 +44,22 @@ pub fn screen_to_char_pos(
     }
 
     let line_start_char = rope.line_to_char(display_row);
+
+    // Shaped path: ask the layout where pixel `relative_x` falls inside the row,
+    // then convert byte offset → char offset via the rope. Only takes this path
+    // when `display_row` falls within the layout's visible window — clicks above
+    // or below scroll fall through to the column math fallback.
+    if let Some(layout) = layout {
+        if let Some(byte_in_line) = layout.byte_at_x(display_row as u32, relative_x) {
+            let line_start_byte = rope.line_to_byte(display_row);
+            let abs_byte = (line_start_byte + byte_in_line).min(rope.len_bytes());
+            return rope.byte_to_char(abs_byte);
+        }
+    }
+
+    let col = (relative_x / font.char_width).max(0.0) as usize;
     let line_len = rope.line(display_row).len_chars().saturating_sub(1);
     let char_in_line = col.min(line_len);
-
     line_start_char + char_in_line
 }
 
@@ -153,6 +168,7 @@ pub fn handle_text_view_mouse(
             &TextViewState,
             &TextViewViewport,
             &FontConfig,
+            Option<&DisplayLayout>,
         ),
         With<TextView>,
     >,
@@ -167,7 +183,7 @@ pub fn handle_text_view_mouse(
 
     // Handle release: clear drag flag on every view that thought it was dragging.
     if mouse_button.just_released(MouseButton::Left) {
-        for (_, _, mut drag_state, _, _, _) in views.iter_mut() {
+        for (_, _, mut drag_state, _, _, _, _) in views.iter_mut() {
             drag_state.is_dragging = false;
         }
         return;
@@ -176,7 +192,7 @@ pub fn handle_text_view_mouse(
     // Handle press: hit-test each view; the one under the cursor begins a drag
     // and acquires keyboard focus.
     if mouse_button.just_pressed(MouseButton::Left) {
-        for (entity, mut sel, mut drag_state, tv, viewport, font) in views.iter_mut() {
+        for (entity, mut sel, mut drag_state, tv, viewport, font, layout) in views.iter_mut() {
             let vp_pos = viewport.hit_test_position;
             let vp_rect = bevy::math::Rect::new(
                 vp_pos.x,
@@ -190,8 +206,15 @@ pub fn handle_text_view_mouse(
             }
 
             let local_pos = Vec2::new(cursor_pos.x - vp_pos.x, cursor_pos.y - vp_pos.y);
-            let char_pos =
-                screen_to_char_pos(local_pos, &tv.rope, tv.scroll_offset, font, viewport, None);
+            let char_pos = screen_to_char_pos(
+                local_pos,
+                &tv.rope,
+                layout.as_deref(),
+                tv.scroll_offset,
+                font,
+                viewport,
+                None,
+            );
 
             sel.selection_start = Some(char_pos);
             sel.selection_end = None;
@@ -206,7 +229,7 @@ pub fn handle_text_view_mouse(
 
     // Handle drag — only the view that started the drag extends its selection.
     if mouse_button.pressed(MouseButton::Left) {
-        for (_, mut sel, mut drag_state, tv, viewport, font) in views.iter_mut() {
+        for (_, mut sel, mut drag_state, tv, viewport, font, layout) in views.iter_mut() {
             if !drag_state.is_dragging {
                 continue;
             }
@@ -222,6 +245,7 @@ pub fn handle_text_view_mouse(
             let char_pos = screen_to_char_pos(
                 local_pos,
                 &tv.rope,
+                layout.as_deref(),
                 tv.scroll_offset,
                 font,
                 viewport,
