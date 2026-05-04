@@ -52,9 +52,21 @@ pub fn screen_to_char_pos(
     let line_start_char = rope.line_to_char(display_row);
 
     if let Some(layout) = layout {
-        if let Some(byte_in_line) = layout.byte_at_x(display_row as u32, relative_x) {
-            let line_start_byte = rope.line_to_byte(display_row);
-            let abs_byte = (line_start_byte + byte_in_line).min(rope.len_bytes());
+        if let Some(byte_in_row) = layout.byte_at_x(display_row as u32, relative_x) {
+            // Use the row's buffer_row + buffer_byte_offset to translate the
+            // row-local byte offset to a rope byte. Trivial layouts always
+            // have buffer_byte_offset=0 and buffer_row==display_row, so this
+            // collapses to the prior behavior; with soft wrap, multiple rows
+            // share a buffer line and the offset becomes load-bearing.
+            let row = layout
+                .lines
+                .iter()
+                .find(|l| l.display_row == display_row as u32);
+            let buffer_line = row.map(|r| r.buffer_row as usize).unwrap_or(display_row);
+            let buffer_byte_offset = row.map(|r| r.buffer_byte_offset).unwrap_or(0);
+            let line_start_byte = rope.line_to_byte(buffer_line.min(rope.len_lines()));
+            let abs_byte =
+                (line_start_byte + buffer_byte_offset + byte_in_row).min(rope.len_bytes());
             return rope.byte_to_char(abs_byte);
         }
     }
