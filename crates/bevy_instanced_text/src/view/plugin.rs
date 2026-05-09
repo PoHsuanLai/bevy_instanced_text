@@ -184,48 +184,88 @@ fn animate_text_view_scroll(
     for (mut state, viewport) in query.iter_mut() {
         let viewport_h = viewport.height as f32;
         let viewport_w = viewport.width as f32;
-        let duration = state.smooth_scroll_duration;
 
-        let needs_new_v = match &state.vertical_anim {
-            Some(anim) => (anim.to - state.target_scroll_offset).abs() > f32::EPSILON,
-            None => (state.target_scroll_offset - state.scroll_offset).abs() > 0.5,
+        // Read current values without triggering change detection.
+        let (duration, target_v, scroll_v, target_h, scroll_h, has_v_anim, has_h_anim) = {
+            let s = state.bypass_change_detection();
+            (
+                s.smooth_scroll_duration,
+                s.target_scroll_offset,
+                s.scroll_offset,
+                s.target_horizontal_scroll_offset,
+                s.horizontal_scroll_offset,
+                s.vertical_anim.is_some(),
+                s.horizontal_anim.is_some(),
+            )
         };
-        if needs_new_v {
-            let from = state.scroll_offset;
-            let to = state.target_scroll_offset;
-            state.vertical_anim = Some(build_animation(from, to, duration, viewport_h));
-        }
-        if let Some(mut anim) = state.vertical_anim.take() {
-            anim.elapsed += dt;
-            if anim.elapsed >= anim.duration {
-                state.scroll_offset = anim.to;
-                state.vertical_anim = None;
-            } else {
-                state.scroll_offset = sample_animation(&anim);
-                state.vertical_anim = Some(anim);
-            }
-        }
 
-        let needs_new_h = match &state.horizontal_anim {
-            Some(anim) => (anim.to - state.target_horizontal_scroll_offset).abs() > f32::EPSILON,
-            None => {
-                (state.target_horizontal_scroll_offset - state.horizontal_scroll_offset).abs() > 0.5
-            }
+        let needs_new_v = if has_v_anim {
+            let to = state.bypass_change_detection().vertical_anim.as_ref().unwrap().to;
+            (to - target_v).abs() > f32::EPSILON
+        } else {
+            (target_v - scroll_v).abs() > 0.5
         };
-        if needs_new_h {
-            let from = state.horizontal_scroll_offset;
-            let to = state.target_horizontal_scroll_offset;
-            state.horizontal_anim = Some(build_animation(from, to, duration, viewport_w));
-        }
-        if let Some(mut anim) = state.horizontal_anim.take() {
-            anim.elapsed += dt;
-            if anim.elapsed >= anim.duration {
-                state.horizontal_scroll_offset = anim.to;
-                state.horizontal_anim = None;
-            } else {
-                state.horizontal_scroll_offset = sample_animation(&anim);
-                state.horizontal_anim = Some(anim);
+
+        let needs_new_h = if has_h_anim {
+            let to = state.bypass_change_detection().horizontal_anim.as_ref().unwrap().to;
+            (to - target_h).abs() > f32::EPSILON
+        } else {
+            (target_h - scroll_h).abs() > 0.5
+        };
+
+        // Determine new anim state without writing yet.
+        let v_anim_next = if needs_new_v {
+            Some(build_animation(scroll_v, target_v, duration, viewport_h))
+        } else {
+            state.bypass_change_detection().vertical_anim.clone()
+        };
+        let h_anim_next = if needs_new_h {
+            Some(build_animation(scroll_h, target_h, duration, viewport_w))
+        } else {
+            state.bypass_change_detection().horizontal_anim.clone()
+        };
+
+        // Step animations and compute new scroll values.
+        let (new_scroll_v, new_v_anim) = match v_anim_next {
+            Some(mut anim) => {
+                anim.elapsed += dt;
+                if anim.elapsed >= anim.duration {
+                    (anim.to, None)
+                } else {
+                    let v = sample_animation(&anim);
+                    (v, Some(anim))
+                }
             }
+            None => (scroll_v, None),
+        };
+
+        let (new_scroll_h, new_h_anim) = match h_anim_next {
+            Some(mut anim) => {
+                anim.elapsed += dt;
+                if anim.elapsed >= anim.duration {
+                    (anim.to, None)
+                } else {
+                    let v = sample_animation(&anim);
+                    (v, Some(anim))
+                }
+            }
+            None => (scroll_h, None),
+        };
+
+        // Only write through the real Mut (triggering change detection) when
+        // values actually changed. This prevents spurious Changed<ScrollState>
+        // on idle frames, which was causing produce_line_styles to rebuild the
+        // full visible window every frame.
+        let scroll_v_changed = (new_scroll_v - scroll_v).abs() > 1e-4;
+        let scroll_h_changed = (new_scroll_h - scroll_h).abs() > 1e-4;
+        let v_anim_changed = needs_new_v || has_v_anim != new_v_anim.is_some();
+        let h_anim_changed = needs_new_h || has_h_anim != new_h_anim.is_some();
+
+        if scroll_v_changed || scroll_h_changed || v_anim_changed || h_anim_changed {
+            state.scroll_offset = new_scroll_v;
+            state.horizontal_scroll_offset = new_scroll_h;
+            state.vertical_anim = new_v_anim;
+            state.horizontal_anim = new_h_anim;
         }
     }
 }
@@ -250,6 +290,7 @@ pub(crate) fn update_text_views(
     mut images: ResMut<Assets<Image>>,
     fonts: Res<Assets<bevy::text::Font>>,
 ) {
+    let _span = bevy::prelude::info_span!("update_text_views").entered();
     for (tv_entity, scroll, viewport, font, layout, overlays, batch_entity_opt, render_layers) in
         text_views.iter_mut()
     {
@@ -286,17 +327,20 @@ pub(crate) fn update_text_views(
             viewport.text_area_left
         };
 
-        let instances = render_layout(
-            layout,
-            overlays,
-            viewport,
-            &mut atlas,
-            &fonts,
-            content_start_x,
-            scroll.horizontal_scroll_offset,
-            font.font_size,
-            faces,
-        );
+        let instances = {
+            let _render_span = bevy::prelude::info_span!("render_layout").entered();
+            render_layout(
+                layout,
+                overlays,
+                viewport,
+                &mut atlas,
+                &fonts,
+                content_start_x,
+                scroll.horizontal_scroll_offset,
+                font.font_size,
+                faces,
+            )
+        };
 
         atlas.update_texture(&mut images);
 

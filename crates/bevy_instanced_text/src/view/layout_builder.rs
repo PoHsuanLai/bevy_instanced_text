@@ -150,6 +150,7 @@ pub(crate) fn produce_layouts(
     fonts: Res<Assets<bevy::text::Font>>,
     mut last_fingerprints: Local<HashMap<Entity, LayoutFingerprint>>,
 ) {
+    let _span = bevy::prelude::info_span!("produce_layouts").entered();
     let mut alive: std::collections::HashSet<Entity> = std::collections::HashSet::new();
     for (
         entity,
@@ -453,12 +454,20 @@ pub(crate) fn build_display_layout(
 
     let visible_rows_end = current_display_row;
 
-    // Total display rows = sum over visible buffer lines of their wrap-row
-    // count. With wrap off, that's just the visible buffer-line count.
-    let total_display_rows: u32 = (0..total_buffer_lines)
-        .filter(|&l| line_visible(l))
-        .map(|l| approx_display_rows_for_line(&buffer.rope, l, approx_wrap_chars))
-        .sum();
+    // With wrap off every line occupies exactly one display row, so the total
+    // is just the visible buffer-line count — no need to walk all 150k lines.
+    let total_display_rows: u32 = if approx_wrap_chars.is_none() {
+        if hidden.is_some() {
+            (0..total_buffer_lines).filter(|&l| line_visible(l)).count() as u32
+        } else {
+            total_buffer_lines as u32
+        }
+    } else {
+        (0..total_buffer_lines)
+            .filter(|&l| line_visible(l))
+            .map(|l| approx_display_rows_for_line(&buffer.rope, l, approx_wrap_chars))
+            .sum()
+    };
 
     DisplayLayout {
         lines: Arc::new(shaped_lines),
