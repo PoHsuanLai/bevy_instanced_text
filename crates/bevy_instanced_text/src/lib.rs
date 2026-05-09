@@ -40,7 +40,7 @@
 //!     .add_systems(Startup, |mut commands: Commands| {
 //!         commands.spawn((
 //!             TextView,
-//!             TextBuffer::from_str("hello world"),
+//!             TextBuffer::with_text("hello world"),
 //!             TextViewViewport::default(),
 //!             FontConfig::default(),
 //!         ));

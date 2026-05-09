@@ -37,7 +37,7 @@
 //!     editor: Query<(&TextViewViewport, &ScrollState, &FontConfig, &DisplayLayout)>,
 //! ) {
 //!     let (viewport, scroll, font, layout) = editor.single().unwrap();
-//!     let metrics = row_metrics(viewport, scroll, font, layout.baseline_offset);
+//!     let metrics = row_metrics(viewport, scroll, font);
 //!     // World-space rect of the visible glyph band on display row 12.
 //!     let band = metrics.row_glyph_band(12);
 //!     let popup_pos = band.min - bevy::math::Vec2::new(0.0, 100.0);
