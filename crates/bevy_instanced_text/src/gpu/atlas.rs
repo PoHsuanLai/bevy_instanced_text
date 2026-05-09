@@ -50,7 +50,6 @@ pub struct GlyphAtlas {
     pub dirty: bool,
     font_system: FontSystem,
     swash_cache: SwashCache,
-    configured_font_id: Option<cosmic_text::fontdb::ID>,
     /// `bevy_text::Font` handles registered with the cosmic-text fontdb,
     /// keyed by AssetId so re-registration is a no-op on subsequent frames.
     loaded_fonts: HashMap<AssetId<Font>, cosmic_text::fontdb::ID>,
@@ -89,22 +88,13 @@ pub const DEFAULT_SHAPE_CACHE_CAPACITY: usize = 8192;
 
 impl GlyphAtlas {
     pub fn new(images: &mut Assets<Image>) -> Self {
-        Self::new_with_font_and_capacity(images, None, DEFAULT_SHAPE_CACHE_CAPACITY)
-    }
-
-    /// `font_path` can be a file path ("fonts/FiraMono-Regular.ttf") or family name ("Fira Mono").
-    pub fn new_with_font(images: &mut Assets<Image>, font_path: Option<&str>) -> Self {
-        Self::new_with_font_and_capacity(images, font_path, DEFAULT_SHAPE_CACHE_CAPACITY)
+        Self::new_with_capacity(images, DEFAULT_SHAPE_CACHE_CAPACITY)
     }
 
     /// Construct with a custom shape-cache capacity. Hosts that work in huge
     /// files (250k+ lines) benefit from a larger cap; embedded / chat
     /// scenarios can shrink it.
-    pub fn new_with_font_and_capacity(
-        images: &mut Assets<Image>,
-        font_path: Option<&str>,
-        shape_cache_capacity: usize,
-    ) -> Self {
+    pub fn new_with_capacity(images: &mut Assets<Image>, shape_cache_capacity: usize) -> Self {
         let pixels = vec![0u8; (ATLAS_SIZE * ATLAS_SIZE * 4) as usize];
 
         let image = Image::new(
@@ -122,14 +112,8 @@ impl GlyphAtlas {
 
         let texture = images.add(image);
 
-        let mut font_system = FontSystem::new();
+        let font_system = FontSystem::new();
         let swash_cache = SwashCache::new();
-
-        let configured_font_id = if let Some(path) = font_path {
-            Self::find_or_load_font(&mut font_system, path)
-        } else {
-            None
-        };
 
         let mut atlas = Self {
             texture,
@@ -139,7 +123,6 @@ impl GlyphAtlas {
             dirty: false,
             font_system,
             swash_cache,
-            configured_font_id,
             loaded_fonts: HashMap::new(),
             cache: HashMap::new(),
             generation: 0,
@@ -164,87 +147,6 @@ impl GlyphAtlas {
         atlas.dirty_max_y = 2;
 
         atlas
-    }
-
-    fn find_or_load_font(
-        font_system: &mut FontSystem,
-        font_path: &str,
-    ) -> Option<cosmic_text::fontdb::ID> {
-        if font_path.ends_with(".ttf") || font_path.ends_with(".otf") {
-            let paths_to_try = [
-                font_path.to_string(),
-                format!("assets/{}", font_path),
-                format!("./{}", font_path),
-            ];
-
-            for path in &paths_to_try {
-                if let Ok(data) = std::fs::read(path) {
-                    let db = font_system.db_mut();
-                    let count_before = db.faces().count();
-                    db.load_font_data(data);
-                    let count_after = db.faces().count();
-
-                    if count_after > count_before {
-                        if let Some(face) = db.faces().last() {
-                            let family_name = face
-                                .families
-                                .first()
-                                .map(|f| f.0.as_str())
-                                .unwrap_or("Unknown");
-                            info!("GPU Text: Loaded font '{}' from {}", family_name, path);
-                            return Some(face.id);
-                        }
-                    }
-                }
-            }
-        }
-
-        // Extract family name from path if it looks like a path
-        let family_name = if font_path.contains('/') || font_path.contains('\\') {
-            std::path::Path::new(font_path)
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .map(|s| {
-                    // Convert "FiraMono-Regular" to "Fira Mono"
-                    s.split('-')
-                        .next()
-                        .unwrap_or(s)
-                        .chars()
-                        .fold(String::new(), |mut acc, c| {
-                            if c.is_uppercase() && !acc.is_empty() && !acc.ends_with(' ') {
-                                acc.push(' ');
-                            }
-                            acc.push(c);
-                            acc
-                        })
-                })
-                .unwrap_or_else(|| font_path.to_string())
-        } else {
-            font_path.to_string()
-        };
-
-        // Search for the font by family name (case-insensitive)
-        let family_lower = family_name.to_lowercase();
-        let db = font_system.db();
-
-        if let Some(id) = db.faces().find_map(|face| {
-            for family in &face.families {
-                if family.0.to_lowercase().contains(&family_lower) {
-                    info!("GPU Text: Using system font '{}'", family.0);
-                    return Some(face.id);
-                }
-            }
-            None
-        }) {
-            return Some(id);
-        }
-
-        // Fall back to any monospace font
-        warn!(
-            "GPU Text: Could not find font '{}', using system monospace fallback",
-            font_path
-        );
-        None
     }
 
     /// Register a `bevy_text::Font` asset's bytes into the cosmic-text font
@@ -523,7 +425,7 @@ mod instanced_extensions {
         ) -> crate::view::snapshot::LineShape {
             use crate::view::snapshot::{LineShape, ShapedGlyph};
 
-            let pinned = font_id.or(self.configured_font_id);
+            let pinned = font_id;
 
             // Cache key: text + font_size + pinned font id.
             // `font_size: f32` → bits to keep `Eq + Hash` honest (NaNs aren't

@@ -14,8 +14,8 @@
 //!
 //! Cascaded by `TextView`'s `#[require]`, so leaving it off uses the
 //! defaults. The atlas-side shape-cache cap is a separate process-wide
-//! concern — see [`crate::gpu::DEFAULT_SHAPE_CACHE_CAPACITY`] and the
-//! [`crate::gpu::GlyphAtlas::new_with_font_and_capacity`] constructor.
+//! concern — see [`crate::gpu::DEFAULT_SHAPE_CACHE_CAPACITY`] and
+//! [`crate::gpu::GlyphAtlas::new_with_capacity`].
 
 use bevy::prelude::*;
 
