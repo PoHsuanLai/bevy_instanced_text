@@ -1,4 +1,4 @@
-# bevy_text_engine
+# bevy_instanced_text
 
 GPU-accelerated text rendering for Bevy. Provides primitives — glyph atlas, instanced rendering, soft-wrap layout producer, overlays — for building editors, terminals, chat panels, log viewers, and any other text-heavy UI.
 
@@ -17,7 +17,7 @@ This is the rendering layer. It owns no input model, no UI framework choice, no 
 
 ## What's NOT in the box
 
-- No selection model, multi-cursor, undo/redo. (See [`bevy_text_editor`](../bevy_text_editor) for the editable-text widget layer; the editor crate has the IDE-specific extras.)
+- No selection model, multi-cursor, undo/redo. (See [`bevy_instanced_text_edit`](../bevy_instanced_text_edit) for the editable-text widget layer; the editor crate has the IDE-specific extras.)
 - No syntax highlighting. The engine takes pre-computed `StyleRun`s. (See [`bevy_tree_sitter`](../bevy_tree_sitter) for tree-sitter integration.)
 - No `bevy_ui::Node` integration. `TextView` renders to a world-space transform inside a `TextViewViewport` rect; embedding inside a flexbox tree requires writing the rect from `ComputedNode` yourself.
 
@@ -25,11 +25,11 @@ This is the rendering layer. It owns no input model, no UI framework choice, no 
 
 ```rust
 use bevy::prelude::*;
-use bevy_text_engine::prelude::*;
+use bevy_instanced_text::prelude::*;
 
 fn main() {
     App::new()
-        .add_plugins((DefaultPlugins, TextEnginePlugins))
+        .add_plugins((DefaultPlugins, InstancedTextPlugins))
         .add_systems(Startup, setup)
         .run();
 }
@@ -47,7 +47,7 @@ fn setup(mut commands: Commands) {
 For static content (no editor, no markdown, just a paragraph of text), populate the `DisplayLayout` with `trivial_layout`:
 
 ```rust
-use bevy_text_engine::view::snapshot::trivial_layout;
+use bevy_instanced_text::view::snapshot::trivial_layout;
 
 let layout = trivial_layout(
     &[
@@ -67,7 +67,7 @@ block-level decoration (background fills + borders for code blocks /
 blockquotes / chat-message bubbles):
 
 ```rust
-use bevy_text_engine::prelude::*;
+use bevy_instanced_text::prelude::*;
 
 fn setup(mut commands: Commands) {
     let blocks = vec![
@@ -114,7 +114,7 @@ let layout = Block::layout(&blocks, BlockLayoutConfig {
 });
 ```
 
-For dynamic content (an editor, a streaming log viewer), write your own producer system that calls `visible_buffer_range(...)` for each `TextView` entity, computes styled runs for the visible window, and stores them in `LineStyles::new(by_line, covered)`. The engine reads `Option<&LineStyles>` and `Option<&HiddenLines>` on each layout pass — no traits, no locks. See the `bevy_code_editor` crate for a worked tree-sitter producer.
+For dynamic content (an editor, a streaming log viewer), write your own producer system that calls `visible_buffer_range(...)` for each `TextView` entity, computes styled runs for the visible window, and stores them in `LineStyles::new(by_line, covered)`. The engine reads `Option<&LineStyles>` and `Option<&HiddenLines>` on each layout pass — no traits, no locks. See the `bevscode` crate for a worked tree-sitter producer.
 
 ## Anchoring inline content (images, buttons, gauges)
 
@@ -151,11 +151,11 @@ and render-layer routing well.
 
 ## Plugin composition
 
-`TextEnginePlugins` is a `PluginGroup` bundling:
+`InstancedTextPlugins` is a `PluginGroup` bundling:
 
 - `GlyphAtlasPlugin` — atlas resource bootstrap.
 - `InstancedTextRenderPlugin` — instanced draw pipeline.
-- `TextEnginePlugin` — view systems (`produce_layouts`, `update_text_views`, `prewarm_atlas_for_layout`, `animate_text_view_scroll`).
+- `InstancedTextPlugin` — view systems (`produce_layouts`, `update_text_views`, `prewarm_atlas_for_layout`, `animate_text_view_scroll`).
 
 Mirror of `bevy::DefaultPlugins`. Hosts that want fine-grained control can add only the constituents they need.
 
