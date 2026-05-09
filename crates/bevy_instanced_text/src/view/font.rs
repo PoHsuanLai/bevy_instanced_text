@@ -22,12 +22,6 @@ pub struct FontConfig {
     pub font_italic: Option<Handle<Font>>,
     pub font_bold_italic: Option<Handle<Font>>,
     pub font_synthesis: FontSynthesis,
-    /// Horizontal padding for an inline background quad (e.g. markdown
-    /// `<code>` runs), as a fraction of `font_size`. `0.25` ≈ 0.25em
-    /// each side — matches typical CSS `<code>` padding and scales
-    /// automatically with size, weight, and DPI. Set to `0.0` to draw
-    /// the background flush with glyph extents.
-    pub inline_bg_hpad_em: f32,
 }
 
 /// Whether (and how) to synthesize a bold / italic face when the
@@ -82,7 +76,6 @@ impl FontConfig {
             font_italic: None,
             font_bold_italic: None,
             font_synthesis: FontSynthesis::default(),
-            inline_bg_hpad_em: 0.25,
         }
     }
 

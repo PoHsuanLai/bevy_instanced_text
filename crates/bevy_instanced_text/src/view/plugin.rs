@@ -180,7 +180,6 @@ pub(crate) fn update_text_views(
             italic,
             bold_italic,
             synthesis: font.font_synthesis,
-            inline_bg_hpad_em: font.inline_bg_hpad_em,
         };
         // Skip the rebuild if neither layout nor overlays changed — the GPU batch is still valid.
         let overlays_changed = overlays.as_ref().map(|o| o.is_changed()).unwrap_or(false);

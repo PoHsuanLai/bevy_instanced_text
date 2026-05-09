@@ -34,9 +34,6 @@ pub struct FontFaces {
     pub italic: Option<cosmic_text::fontdb::ID>,
     pub bold_italic: Option<cosmic_text::fontdb::ID>,
     pub synthesis: FontSynthesis,
-    /// Inline-background horizontal padding as a fraction of font size
-    /// (mirrors [`crate::view::FontConfig::inline_bg_hpad_em`]).
-    pub inline_bg_hpad_em: f32,
 }
 
 impl Default for FontFaces {
@@ -47,7 +44,6 @@ impl Default for FontFaces {
             italic: None,
             bold_italic: None,
             synthesis: FontSynthesis::default(),
-            inline_bg_hpad_em: 0.25,
         }
     }
 }
@@ -62,7 +58,6 @@ impl FontFaces {
             italic: None,
             bold_italic: None,
             synthesis: FontSynthesis::default(),
-            inline_bg_hpad_em: 0.25,
         }
     }
 
@@ -369,7 +364,6 @@ pub fn render_layout(
                             atlas,
                             run_face,
                             shape_usable,
-                            faces.inline_bg_hpad_em,
                             &mut below_instances,
                             &mut text_instances,
                         );
@@ -563,12 +557,10 @@ fn emit_unshaped_run_glyphs(
     }
 }
 
-/// Emit a per-run background quad sized to the glyphs' actual ink bounds,
-/// then emit the glyphs themselves. Sharing the shaping result between
-/// the bg-sizing pass and the glyph-emit pass lets the bg hug the visible
-/// glyphs (no trailing right-side-bearing whitespace, no leading
-/// left-side-bearing slack) — symmetric across font, weight, and size
-/// without any em-relative or pixel-relative magic constants.
+/// Emit a per-run background quad spanning the run's advance bounds, then
+/// emit the glyphs. Using advance bounds (not ink bounds) means the chip
+/// extends to the same edges as the surrounding text's character cells,
+/// matching how browsers render `<code>` — no side-bearing gap on either side.
 #[allow(clippy::too_many_arguments)]
 fn emit_run_with_bg(
     line: &ShapedLine,
@@ -584,35 +576,17 @@ fn emit_run_with_bg(
     atlas: &mut GlyphAtlas,
     run_face: Option<cosmic_text::fontdb::ID>,
     shape_usable: Option<&Arc<super::snapshot::LineShape>>,
-    inline_bg_hpad_em: f32,
     below: &mut Vec<GlyphInstance>,
     text: &mut Vec<GlyphInstance>,
 ) {
-    // Shape (or reuse the line's shape) and walk the run's glyphs to find
-    // both the leftmost ink boundary and the rightmost. Fall back to
-    // advance-edge bounds if shaping fails.
-    let (ink_left, ink_right) = run_ink_bounds(
-        line,
-        run,
-        seg_x_start,
-        seg_x_end,
-        seg_font_size,
-        atlas,
-        run_face,
-        shape_usable,
-    );
-
     let baseline_y_off = line_height * 0.5 + baseline_offset;
     let cap_to_descender = baseline_y_off + baseline_offset * 0.6;
     let text_band_above = cap_to_descender * 0.25;
     let band_top_y_off = baseline_y_off - text_band_above;
-    // Equal padding on each side, scaled to the run's font size.
-    let hpad = inline_bg_hpad_em * seg_font_size;
-    let bg_x = ink_left - hpad;
-    let bg_w = (ink_right - ink_left + hpad * 2.0).max(0.0);
+    let bg_w = (seg_x_end - seg_x_start).max(0.0);
     below.push(GlyphInstance {
         position: Vec2::new(
-            anchor.viewport_world_left + anchor.line_x + bg_x,
+            anchor.viewport_world_left + anchor.line_x + seg_x_start,
             anchor.viewport_world_top - line.y_top - band_top_y_off - cap_to_descender * 0.5,
         ),
         uv_min: atlas.solid_uv.uv_min,
@@ -679,55 +653,6 @@ fn emit_run_glyphs_only(
     }
 }
 
-/// Inspect each glyph in the run, rasterize to read its ink bounds
-/// (`info.offset.x .. info.offset.x + info.size.x`), and return the
-/// run's combined `(ink_left, ink_right)` in line-local pixels. Falls
-/// back to `(seg_x_start, seg_x_end)` (the advance bounds) when
-/// shaping returns no usable glyphs.
-#[allow(clippy::too_many_arguments)]
-fn run_ink_bounds(
-    line: &ShapedLine,
-    run: &StyleRun,
-    seg_x_start: f32,
-    seg_x_end: f32,
-    seg_font_size: f32,
-    atlas: &mut GlyphAtlas,
-    run_face: Option<cosmic_text::fontdb::ID>,
-    shape_usable: Option<&Arc<super::snapshot::LineShape>>,
-) -> (f32, f32) {
-    let mut min_x = f32::INFINITY;
-    let mut max_x = f32::NEG_INFINITY;
-
-    // Shape-usable path: scan the line's pre-shaped glyphs in the run's
-    // byte range and use their actual cache-key info.
-    if let Some(shape) = shape_usable {
-        for g in &shape.glyphs {
-            if g.byte_index < run.byte_range.start || g.byte_index >= run.byte_range.end {
-                continue;
-            }
-            if let Some((info, _)) = atlas.get_or_rasterize_glyph(g.cache_key) {
-                min_x = min_x.min(g.x + info.offset.x);
-                max_x = max_x.max(g.x + info.offset.x + info.size.x);
-            }
-        }
-    } else if let Some(slice) = line.text.get(run.byte_range.clone()) {
-        let shape_text = slice.strip_suffix('\n').unwrap_or(slice);
-        let shape = atlas.shape_line(shape_text, seg_font_size, run_face);
-        for g in &shape.glyphs {
-            if let Some((info, _)) = atlas.get_or_rasterize_glyph(g.cache_key) {
-                let glyph_x = seg_x_start + g.x;
-                min_x = min_x.min(glyph_x + info.offset.x);
-                max_x = max_x.max(glyph_x + info.offset.x + info.size.x);
-            }
-        }
-    }
-
-    if min_x.is_finite() && max_x.is_finite() && max_x > min_x {
-        (min_x, max_x)
-    } else {
-        (seg_x_start, seg_x_end)
-    }
-}
 
 /// Emit one filled rect (background) and four edge rects (border) per
 /// decorated block. Sized from the block's first/last visible row, padded
@@ -868,7 +793,9 @@ fn push_overlay_quad(
     };
     let line_height = line.line_height.unwrap_or(layout.line_height);
     let baseline_offset = layout.baseline_offset;
-    let x0 = rect.x_range.start.max(0.0);
+    // Negative x_range.start is intentional for overlays that need to
+    // render to the left of the block's own indent (e.g. blockquote bars).
+    let x0 = rect.x_range.start;
     let x1 = if rect.x_range.end >= f32::MAX / 2.0 {
         // Sentinel: extend to the viewport's right edge.
         // world_x_right == world_left + viewport_width

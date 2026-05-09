@@ -317,7 +317,6 @@ mod tests {
             font_italic: None,
             font_bold_italic: None,
             font_synthesis: Default::default(),
-            inline_bg_hpad_em: 0.25,
         };
         let buffer = TextBuffer::with_text("hello world\nsecond line\nthird");
         let mut layout = DisplayLayout::default();
@@ -375,7 +374,6 @@ mod tests {
             font_italic: None,
             font_bold_italic: None,
             font_synthesis: Default::default(),
-            inline_bg_hpad_em: 0.25,
         };
         let buffer = TextBuffer::with_text("plain text");
 
@@ -429,7 +427,6 @@ mod tests {
             font_italic: None,
             font_bold_italic: None,
             font_synthesis: Default::default(),
-            inline_bg_hpad_em: 0.25,
         };
         let metrics = super::row_metrics_with_baseline(&viewport, &scroll, &font, 14.0 * 0.32);
         let expected_screen_x = viewport.text_area_left + 3.0 * font.char_width
@@ -476,7 +473,6 @@ mod tests {
             font_italic: None,
             font_bold_italic: None,
             font_synthesis: Default::default(),
-            inline_bg_hpad_em: 0.25,
         };
         let metrics = super::row_metrics_with_baseline(&viewport, &scroll, &font, 14.0 * 0.32);
         let expected = metrics.cell_world_pos_at_x(2, 4.0 * font.char_width);

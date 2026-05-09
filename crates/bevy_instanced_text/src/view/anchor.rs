@@ -398,7 +398,6 @@ mod tests {
             font_italic: None,
             font_bold_italic: None,
             font_synthesis: Default::default(),
-            inline_bg_hpad_em: 0.25,
         };
         // baseline_offset matching FontConfig::from_size / layout default.
         row_metrics_with_baseline(&viewport, &scroll, &font, 14.0 * 0.32)
@@ -524,7 +523,6 @@ mod tests {
             font_italic: None,
             font_bold_italic: None,
             font_synthesis: Default::default(),
-            inline_bg_hpad_em: 0.25,
         };
         let mut layout = DisplayLayout::default();
         layout.baseline_offset = 14.0 * 0.32;
