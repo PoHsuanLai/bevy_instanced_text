@@ -1,11 +1,11 @@
 //! Text view plugin — registers the rendering and scroll animation systems
 //! that turn `TextView` entities into GPU draw batches.
 //!
-//! This module also defines [`TextEnginePlugins`], a [`PluginGroup`] that
+//! This module also defines [`InstancedTextPlugins`], a [`PluginGroup`] that
 //! bundles the GPU plugins from [`crate::gpu`] together with the view-side
-//! [`TextEnginePlugin`]. Hosts that just want "render styled text" should
-//! add `TextEnginePlugins`; those that already manage the GPU pipeline
-//! themselves can add [`TextEnginePlugin`] alone.
+//! [`InstancedTextPlugin`]. Hosts that just want "render styled text" should
+//! add `InstancedTextPlugins`; those that already manage the GPU pipeline
+//! themselves can add [`InstancedTextPlugin`] alone.
 
 use bevy::app::{PluginGroup, PluginGroupBuilder};
 use bevy::prelude::*;
@@ -26,7 +26,7 @@ use crate::gpu::{atlas_ready, GlyphAtlas, GlyphAtlasPlugin, InstancedTextRenderP
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct TextViewRenderSet;
 
-/// Marker for a text view rendered by [`TextEnginePlugin`]. `#[require]`
+/// Marker for a text view rendered by [`InstancedTextPlugin`]. `#[require]`
 /// cascades the rest of the rendering machinery — spawning `TextView` alone
 /// is enough. Includes `Pickable` so `bevy_instanced_text_edit::picking` can produce
 /// `PointerHits` without the engine needing to register the backend itself.
@@ -54,11 +54,11 @@ pub struct TextView;
 pub struct TextViewBatchEntity(pub Entity);
 
 /// Registers the rendering and scroll animation systems. Does not add GPU
-/// plugins — use [`TextEnginePlugins`] for the full bundle.
+/// plugins — use [`InstancedTextPlugins`] for the full bundle.
 #[derive(Default)]
-pub struct TextEnginePlugin;
+pub struct InstancedTextPlugin;
 
-impl Plugin for TextEnginePlugin {
+impl Plugin for InstancedTextPlugin {
     fn build(&self, app: &mut App) {
         app.register_type::<LayoutTuning>();
 
@@ -103,15 +103,15 @@ impl Plugin for TextEnginePlugin {
 }
 
 /// Full bundle: [`GlyphAtlasPlugin`] + [`InstancedTextRenderPlugin`]
-/// + [`TextEnginePlugin`].
-pub struct TextEnginePlugins;
+/// + [`InstancedTextPlugin`].
+pub struct InstancedTextPlugins;
 
-impl PluginGroup for TextEnginePlugins {
+impl PluginGroup for InstancedTextPlugins {
     fn build(self) -> PluginGroupBuilder {
         PluginGroupBuilder::start::<Self>()
             .add(GlyphAtlasPlugin)
             .add(InstancedTextRenderPlugin)
-            .add(TextEnginePlugin)
+            .add(InstancedTextPlugin)
     }
 }
 

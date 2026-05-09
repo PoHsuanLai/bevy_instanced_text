@@ -36,7 +36,7 @@
 //!
 //! App::new()
 //!     .add_plugins(DefaultPlugins)
-//!     .add_plugins(TextEnginePlugins)
+//!     .add_plugins(InstancedTextPlugins)
 //!     .add_systems(Startup, |mut commands: Commands| {
 //!         commands.spawn((
 //!             TextView,
@@ -61,7 +61,7 @@ pub mod prelude {
         row_metrics, row_metrics_with_baseline, AnchorPoint, Block, BlockDecorTheme,
         BlockLayoutConfig, BlockList, BufferAnchorParam, ContentMetrics, DisplayLayout, FontConfig,
         FontSynthesis, HiddenLines, LayoutWrap, LineStyles, RenderTheme, RowMetrics,
-        RowMetricsParam, RunWithText, ScrollState, StyleRun, TextBuffer, TextEnginePlugin,
-        TextEnginePlugins, TextView, TextViewViewport,
+        RowMetricsParam, RunWithText, ScrollState, StyleRun, TextBuffer, InstancedTextPlugin,
+        InstancedTextPlugins, TextView, TextViewViewport,
     };
 }

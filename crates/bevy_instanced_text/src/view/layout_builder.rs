@@ -120,7 +120,7 @@ pub fn visible_buffer_range(
     start..end
 }
 
-/// The engine's layout system. Registered by `TextEnginePlugin`.
+/// The engine's layout system. Registered by `InstancedTextPlugin`.
 ///
 /// Walks every `TextView` entity, fingerprints its inputs, skips when
 /// nothing changed, and otherwise rebuilds the entity's `DisplayLayout`.

@@ -30,7 +30,7 @@ pub use overlay::{
     for_each_row_in_buffer_span, CornerRadii, RectOverlay, RowPosition, RowVertical,
     TextViewOverlays,
 };
-pub use plugin::{TextEnginePlugin, TextEnginePlugins, TextView, TextViewBatchEntity, TextViewRenderSet};
+pub use plugin::{InstancedTextPlugin, InstancedTextPlugins, TextView, TextViewBatchEntity, TextViewRenderSet};
 pub use render::{render_layout, FontFaces, GlyphBatchComponent, GlyphInstance, TextViewBatch};
 pub use snapshot::{
     trivial_layout, Block, BlockBorder, BlockDecoration, BlockLayoutConfig, BlockRect,
