@@ -27,25 +27,13 @@ use super::viewport::TextViewViewport;
 /// Built once per text-view per frame in `update_text_views`
 /// from the entity's `FontConfig` (each `Handle<Font>` is registered with
 /// the atlas's cosmic-text font system on first use).
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct FontFaces {
     pub regular: Option<cosmic_text::fontdb::ID>,
     pub bold: Option<cosmic_text::fontdb::ID>,
     pub italic: Option<cosmic_text::fontdb::ID>,
     pub bold_italic: Option<cosmic_text::fontdb::ID>,
     pub synthesis: FontSynthesis,
-}
-
-impl Default for FontFaces {
-    fn default() -> Self {
-        Self {
-            regular: None,
-            bold: None,
-            italic: None,
-            bold_italic: None,
-            synthesis: FontSynthesis::default(),
-        }
-    }
 }
 
 impl FontFaces {
@@ -66,7 +54,11 @@ impl FontFaces {
     /// face on the requested axis (bold-italic → bold → regular, etc.).
     fn pick(&self, bold: bool, italic: bool) -> Option<cosmic_text::fontdb::ID> {
         match (bold, italic) {
-            (true, true) => self.bold_italic.or(self.bold).or(self.italic).or(self.regular),
+            (true, true) => self
+                .bold_italic
+                .or(self.bold)
+                .or(self.italic)
+                .or(self.regular),
             (true, false) => self.bold.or(self.regular),
             (false, true) => self.italic.or(self.regular),
             (false, false) => self.regular,
@@ -147,6 +139,13 @@ pub struct GlyphBatchComponent {
     pub render_layer: Option<u8>,
 }
 
+pub struct RenderContext {
+    pub content_start_x: f32,
+    pub horizontal_scroll_offset: f32,
+    pub font_size: f32,
+    pub faces: FontFaces,
+}
+
 /// Render a `DisplayLayout` into glyph instances. Pure function over an immutable
 /// snapshot — folding, wrapping, culling, and styling are already done by the producer.
 /// Overlays via `RectOverlay`: negative-z renders below text, positive-z above.
@@ -156,11 +155,14 @@ pub fn render_layout(
     viewport: &TextViewViewport,
     atlas: &mut GlyphAtlas,
     fonts: &bevy::asset::Assets<bevy::text::Font>,
-    content_start_x: f32,
-    horizontal_scroll_offset: f32,
-    font_size: f32,
-    faces: FontFaces,
+    ctx: RenderContext,
 ) -> Vec<GlyphInstance> {
+    let RenderContext {
+        content_start_x,
+        horizontal_scroll_offset,
+        font_size,
+        faces,
+    } = ctx;
     let default_line_height = layout.line_height;
     let char_width = layout.char_width;
     let baseline_offset = layout.baseline_offset;
@@ -220,7 +222,6 @@ pub fn render_layout(
         let base_y = line.y_top + line_height * 0.5 + baseline_offset;
         let line_x = line_start_x + line.x_offset;
 
-
         // Line background (full-width quad) — full row, top-anchored on y_top.
         if let Some(bg) = line.line_bg {
             let margin = content_start_x;
@@ -275,9 +276,7 @@ pub fn render_layout(
             .filter(|s| (s.font_size - font_size).abs() < f32::EPSILON)
             .filter(|_| {
                 line.runs.iter().all(|r| {
-                    (r.font_scale == 0.0 || r.font_scale == 1.0)
-                        && !run_is_bold(r)
-                        && !r.italic
+                    (r.font_scale == 0.0 || r.font_scale == 1.0) && !run_is_bold(r) && !r.italic
                 })
             });
 
@@ -342,7 +341,11 @@ pub fn render_layout(
                 let style = RunStyle {
                     color: linear_rgba(run.fg),
                     skew: effective_skew,
-                    stroke_offset_px: if synth_bold { faces.synthesis.bold_stroke_px } else { 0.0 },
+                    stroke_offset_px: if synth_bold {
+                        faces.synthesis.bold_stroke_px
+                    } else {
+                        0.0
+                    },
                 };
                 let seg_font_size = if run.font_scale > 0.0 {
                     font_size * run.font_scale
@@ -517,7 +520,12 @@ fn push_glyph(
 ) {
     out.push(glyph_quad(info, pen_x, anchor, style));
     if style.stroke_offset_px > 0.0 {
-        out.push(glyph_quad(info, pen_x + style.stroke_offset_px, anchor, style));
+        out.push(glyph_quad(
+            info,
+            pen_x + style.stroke_offset_px,
+            anchor,
+            style,
+        ));
     }
 }
 
@@ -559,6 +567,7 @@ struct RunMetrics {
 /// Shaping a per-frame slice is cheap — it's the same code path the producer
 /// uses, just narrowed to the run. For monospace ASCII it yields advances
 /// byte-identical to the old `col * char_width` walk.
+#[allow(clippy::too_many_arguments)]
 fn emit_unshaped_run_glyphs(
     line: &ShapedLine,
     range: std::ops::Range<usize>,
@@ -688,7 +697,6 @@ fn emit_run_glyphs_only(
     }
 }
 
-
 /// Emit one filled rect (background) and four edge rects (border) per
 /// decorated block. Sized from the block's first/last visible row, padded
 /// by the block's `padding_top` / `padding_bottom`. Width spans the
@@ -809,6 +817,7 @@ fn push_block_decorations(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn push_overlay_quad(
     rect: &super::overlay::RectOverlay,
     layout: &DisplayLayout,
@@ -900,7 +909,6 @@ fn push_overlay_quad(
     // *center* of the rect; world_top inverts Y.
     let world_y = world_top - line.y_top - y_off - height * 0.5;
 
-
     out.push(GlyphInstance {
         position: Vec2::new(world_x, world_y),
         uv_min: solid_uv.uv_min,
@@ -929,6 +937,7 @@ fn linear_rgba(color: Color) -> [f32; 4] {
 /// `x_start`/`x_end` are line-local pixels from `line_byte_to_x` — the same
 /// coordinate space as selection `x_range`. Y is derived from `anchor.base_y`
 /// (the glyph baseline) using the same math as `push_overlay_quad`.
+#[allow(clippy::too_many_arguments)]
 fn emit_run_decoration(
     decoration: TextDecoration,
     fg: Color,

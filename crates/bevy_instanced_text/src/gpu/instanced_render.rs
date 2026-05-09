@@ -123,8 +123,7 @@ fn prepare_instance_buffers(
     pipeline_cache: Res<PipelineCache>,
     gpu_images: Res<RenderAssets<GpuImage>>,
 ) {
-    let atlas_layout =
-        pipeline_cache.get_bind_group_layout(&pipeline.atlas_bind_group_layout);
+    let atlas_layout = pipeline_cache.get_bind_group_layout(&pipeline.atlas_bind_group_layout);
 
     for (entity, batch) in &query {
         if batch.instances.is_empty() {
@@ -344,8 +343,7 @@ fn queue_instanced_text(
         let view_key = Mesh2dPipelineKey::from_msaa_samples(msaa.samples())
             | Mesh2dPipelineKey::from_hdr(view.hdr);
 
-        let pipeline_id =
-            pipelines.specialize(&pipeline_cache, &instanced_text_pipeline, view_key);
+        let pipeline_id = pipelines.specialize(&pipeline_cache, &instanced_text_pipeline, view_key);
 
         for (entity, main_entity, global_transform, batch) in &batches {
             // Filter by render layer.

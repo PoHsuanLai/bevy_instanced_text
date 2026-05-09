@@ -126,11 +126,7 @@ impl DisplayLayout {
 
 /// Line-local pixel x for a byte offset. Reused by `render.rs` for run start
 /// positions and background widths.
-pub(crate) fn line_x_at_byte(
-    line: &ShapedLine,
-    byte: usize,
-    char_width_fallback: f32,
-) -> f32 {
+pub(crate) fn line_x_at_byte(line: &ShapedLine, byte: usize, char_width_fallback: f32) -> f32 {
     if let Some(shape) = &line.shape {
         // Linear scan is fine — visible lines are short. Cluster starts are
         // monotonic for LTR; BiDi isn't rendered yet so scanning is correct.
@@ -154,11 +150,7 @@ pub(crate) fn line_x_at_byte(
 }
 
 /// Inverse of [`line_x_at_byte`]: snap a line-local pixel x to the nearest cluster boundary.
-pub(crate) fn line_byte_at_x(
-    line: &ShapedLine,
-    x: f32,
-    char_width_fallback: f32,
-) -> usize {
+pub(crate) fn line_byte_at_x(line: &ShapedLine, x: f32, char_width_fallback: f32) -> usize {
     if let Some(shape) = &line.shape {
         if x <= 0.0 {
             return shape.glyphs.first().map(|g| g.byte_index).unwrap_or(0);
@@ -168,7 +160,11 @@ pub(crate) fn line_byte_at_x(
             let next = &window[1];
             if x < next.x {
                 let mid = (cur.x + next.x) * 0.5;
-                return if x < mid { cur.byte_index } else { next.byte_index };
+                return if x < mid {
+                    cur.byte_index
+                } else {
+                    next.byte_index
+                };
             }
         }
         return line.text.len();

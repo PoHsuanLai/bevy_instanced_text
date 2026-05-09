@@ -394,8 +394,7 @@ fn layout_blocks_inner(blocks: &[Block], cfg: BlockLayoutConfig) -> super::layou
             let is_continuation = chunk_idx > 0;
             let is_last = chunk_idx == last_idx;
             let chunk_len = chunk_text.len();
-            let chunk_runs =
-                slice_runs_for_chunk(&b.runs, byte_offset, byte_offset + chunk_len);
+            let chunk_runs = slice_runs_for_chunk(&b.runs, byte_offset, byte_offset + chunk_len);
             shaped.push(ShapedLine {
                 display_row,
                 buffer_row: i as u32,
@@ -572,7 +571,16 @@ mod tests {
             Block::new("fn x() {}").with_padding(6.0, 6.0),
         ];
 
-        let layout = Block::layout(&blocks, BlockLayoutConfig { line_height: 16.0, char_width: 8.0, baseline_offset: 5.0, default_fg: Color::WHITE, default_wrap_chars: None });
+        let layout = Block::layout(
+            &blocks,
+            BlockLayoutConfig {
+                line_height: 16.0,
+                char_width: 8.0,
+                baseline_offset: 5.0,
+                default_fg: Color::WHITE,
+                default_wrap_chars: None,
+            },
+        );
         let lines = &*layout.lines;
         assert_eq!(lines.len(), 4);
 
@@ -594,7 +602,16 @@ mod tests {
             Block::new("  - nested").with_indent(40.0),
             Block::new("> quote").with_indent(16.0),
         ];
-        let layout = Block::layout(&blocks, BlockLayoutConfig { line_height: 16.0, char_width: 8.0, baseline_offset: 5.0, default_fg: Color::WHITE, default_wrap_chars: None });
+        let layout = Block::layout(
+            &blocks,
+            BlockLayoutConfig {
+                line_height: 16.0,
+                char_width: 8.0,
+                baseline_offset: 5.0,
+                default_fg: Color::WHITE,
+                default_wrap_chars: None,
+            },
+        );
         let lines = &*layout.lines;
         assert_eq!(lines[0].x_offset, 0.0);
         assert_eq!(lines[1].x_offset, 20.0);
@@ -604,11 +621,17 @@ mod tests {
 
     #[test]
     fn trivial_layout_no_padding_matches_old_behavior() {
-        let blocks: Vec<Block> = ["a", "b", "c"]
-            .iter()
-            .map(|s| Block::new(*s))
-            .collect();
-        let layout = Block::layout(&blocks, BlockLayoutConfig { line_height: 20.0, char_width: 8.0, baseline_offset: 5.0, default_fg: Color::WHITE, default_wrap_chars: None });
+        let blocks: Vec<Block> = ["a", "b", "c"].iter().map(|s| Block::new(*s)).collect();
+        let layout = Block::layout(
+            &blocks,
+            BlockLayoutConfig {
+                line_height: 20.0,
+                char_width: 8.0,
+                baseline_offset: 5.0,
+                default_fg: Color::WHITE,
+                default_wrap_chars: None,
+            },
+        );
         let lines = &*layout.lines;
         assert_eq!(lines[0].y_top, 0.0);
         assert_eq!(lines[1].y_top, 20.0);
@@ -623,7 +646,16 @@ mod tests {
     fn layout_blocks_wraps_at_word_boundary() {
         let body = "the quick brown fox jumps over the lazy dog and runs away.";
         let blocks = vec![Block::new(body).with_indent(10.0)];
-        let layout = Block::layout(&blocks, BlockLayoutConfig { line_height: 16.0, char_width: 8.0, baseline_offset: 5.0, default_fg: Color::WHITE, default_wrap_chars: Some(30) });
+        let layout = Block::layout(
+            &blocks,
+            BlockLayoutConfig {
+                line_height: 16.0,
+                char_width: 8.0,
+                baseline_offset: 5.0,
+                default_fg: Color::WHITE,
+                default_wrap_chars: Some(30),
+            },
+        );
         let lines = &*layout.lines;
 
         assert!(lines.len() >= 2);
@@ -640,7 +672,11 @@ mod tests {
 
         for line in lines.iter() {
             let chars = line.text.chars().count();
-            assert!(chars <= 31, "chunk {:?} exceeded budget+1, got {chars}", line.text);
+            assert!(
+                chars <= 31,
+                "chunk {:?} exceeded budget+1, got {chars}",
+                line.text
+            );
         }
     }
 
@@ -650,13 +686,24 @@ mod tests {
     fn layout_blocks_wrap_keeps_long_words_intact() {
         let body = "short pneumonoultramicroscopicsilicovolcanoconiosis end";
         let blocks = vec![Block::new(body)];
-        let layout = Block::layout(&blocks, BlockLayoutConfig { line_height: 16.0, char_width: 8.0, baseline_offset: 5.0, default_fg: Color::WHITE, default_wrap_chars: Some(10) });
+        let layout = Block::layout(
+            &blocks,
+            BlockLayoutConfig {
+                line_height: 16.0,
+                char_width: 8.0,
+                baseline_offset: 5.0,
+                default_fg: Color::WHITE,
+                default_wrap_chars: Some(10),
+            },
+        );
         let lines = &*layout.lines;
 
         let recomposed: String = lines.iter().map(|l| l.text.clone()).collect();
         assert_eq!(recomposed, body);
         assert!(
-            lines.iter().any(|l| l.text.contains("pneumonoultramicroscopicsilicovolcanoconiosis")),
+            lines.iter().any(|l| l
+                .text
+                .contains("pneumonoultramicroscopicsilicovolcanoconiosis")),
             "long word was split across rows: {:?}",
             lines.iter().map(|l| &l.text).collect::<Vec<_>>()
         );
@@ -670,12 +717,24 @@ mod tests {
             Block::new("alpha bravo charlie delta echo foxtrot"),
             Block::new("uno dos tres cuatro cinco seis siete").with_wrap_chars(0),
         ];
-        let layout = Block::layout(&blocks, BlockLayoutConfig { line_height: 16.0, char_width: 8.0, baseline_offset: 5.0, default_fg: Color::WHITE, default_wrap_chars: Some(15) });
+        let layout = Block::layout(
+            &blocks,
+            BlockLayoutConfig {
+                line_height: 16.0,
+                char_width: 8.0,
+                baseline_offset: 5.0,
+                default_fg: Color::WHITE,
+                default_wrap_chars: Some(15),
+            },
+        );
         let lines = &*layout.lines;
 
         let block0_rows = lines.iter().filter(|l| l.buffer_row == 0).count();
         let block1_rows = lines.iter().filter(|l| l.buffer_row == 1).count();
-        assert!(block0_rows >= 2, "block 0 should wrap, got {block0_rows} rows");
+        assert!(
+            block0_rows >= 2,
+            "block 0 should wrap, got {block0_rows} rows"
+        );
         assert_eq!(block1_rows, 1, "block 1 should not wrap");
     }
 
@@ -686,8 +745,8 @@ mod tests {
         // Crafted so a budget of 10 puts "the quick " on row 0 and
         // "fox" (with its run) entirely inside row 1.
         let text = "the quick fox runs";
-        let fox_start = text.find("fox").unwrap();              // 10
-        let fox_end = fox_start + "fox".len();                  // 13
+        let fox_start = text.find("fox").unwrap(); // 10
+        let fox_end = fox_start + "fox".len(); // 13
         let runs = vec![StyleRun {
             byte_range: fox_start..fox_end,
             fg: Color::srgb(1.0, 0.0, 0.0),
@@ -706,7 +765,16 @@ mod tests {
         // Budget 10 splits at the space after "quick" (byte 10). Row 0 =
         // "the quick " (bytes 0..10) — pre-fox, no runs. Row 1 = "fox runs"
         // (bytes 10..18) — holds the fox run rebased to local 0..3.
-        let layout = Block::layout(&blocks, BlockLayoutConfig { line_height: 16.0, char_width: 8.0, baseline_offset: 5.0, default_fg: Color::WHITE, default_wrap_chars: Some(10) });
+        let layout = Block::layout(
+            &blocks,
+            BlockLayoutConfig {
+                line_height: 16.0,
+                char_width: 8.0,
+                baseline_offset: 5.0,
+                default_fg: Color::WHITE,
+                default_wrap_chars: Some(10),
+            },
+        );
         let lines = &*layout.lines;
         assert_eq!(lines.len(), 2);
 
@@ -730,11 +798,22 @@ mod tests {
                 .with_block_corner_radius(4.0),
             Block::new("> blockquote line").with_block_border(Color::srgb(0.5, 0.5, 0.5), 1.0),
         ];
-        let layout = Block::layout(&blocks, BlockLayoutConfig { line_height: 16.0, char_width: 8.0, baseline_offset: 5.0, default_fg: Color::WHITE, default_wrap_chars: None });
+        let layout = Block::layout(
+            &blocks,
+            BlockLayoutConfig {
+                line_height: 16.0,
+                char_width: 8.0,
+                baseline_offset: 5.0,
+                default_fg: Color::WHITE,
+                default_wrap_chars: None,
+            },
+        );
 
         // Two decorated blocks → two rects (the plain body has neither).
         assert_eq!(layout.block_rects.len(), 2);
-        let [code, quote] = &layout.block_rects[..] else { panic!("expected 2 rects"); };
+        let [code, quote] = &layout.block_rects[..] else {
+            panic!("expected 2 rects");
+        };
 
         // The code block lives at display_row 1 (after the plain body).
         assert_eq!(code.display_row_start, 1);
@@ -756,9 +835,17 @@ mod tests {
     #[test]
     fn layout_blocks_block_rect_spans_wrap_continuation() {
         let body = "alpha bravo charlie delta echo foxtrot golf hotel";
-        let blocks = vec![Block::new(body)
-            .with_block_background(Color::srgb(0.2, 0.2, 0.3))];
-        let layout = Block::layout(&blocks, BlockLayoutConfig { line_height: 16.0, char_width: 8.0, baseline_offset: 5.0, default_fg: Color::WHITE, default_wrap_chars: Some(10) });
+        let blocks = vec![Block::new(body).with_block_background(Color::srgb(0.2, 0.2, 0.3))];
+        let layout = Block::layout(
+            &blocks,
+            BlockLayoutConfig {
+                line_height: 16.0,
+                char_width: 8.0,
+                baseline_offset: 5.0,
+                default_fg: Color::WHITE,
+                default_wrap_chars: Some(10),
+            },
+        );
 
         assert_eq!(layout.block_rects.len(), 1);
         let rect = &layout.block_rects[0];

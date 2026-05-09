@@ -590,7 +590,10 @@ mod instanced_extensions {
                         (x + width as u32) as f32 / ATLAS_SIZE as f32,
                         (y + height as u32) as f32 / ATLAS_SIZE as f32,
                     ),
-                    size: Vec2::new(width as f32 / self.raster_scale, height as f32 / self.raster_scale),
+                    size: Vec2::new(
+                        width as f32 / self.raster_scale,
+                        height as f32 / self.raster_scale,
+                    ),
                     offset: Vec2::new(
                         image.placement.left as f32 / self.raster_scale,
                         image.placement.top as f32 / self.raster_scale,

@@ -84,9 +84,8 @@ pub fn visible_buffer_range(
     let last_visible_display_row = first_visible_display_row + visible_count;
 
     let approx_wrap_chars = wrap.budget_px.map(|px| (px / char_width).max(1.0) as usize);
-    let visible = |buffer_line: usize| -> bool {
-        hidden.map(|h| h.is_visible(buffer_line)).unwrap_or(true)
-    };
+    let visible =
+        |buffer_line: usize| -> bool { hidden.map(|h| h.is_visible(buffer_line)).unwrap_or(true) };
 
     // Walk forward to find `start`, the first buffer line whose display row
     // is in the visible window.
@@ -94,11 +93,8 @@ pub fn visible_buffer_range(
     let mut buffer_line: usize = 0;
     while buffer_line < total && display_row < first_visible_display_row {
         if visible(buffer_line) {
-            display_row += approx_display_rows_for_line(
-                &buffer.rope,
-                buffer_line,
-                approx_wrap_chars,
-            );
+            display_row +=
+                approx_display_rows_for_line(&buffer.rope, buffer_line, approx_wrap_chars);
         }
         buffer_line += 1;
     }
@@ -107,11 +103,8 @@ pub fn visible_buffer_range(
     // Continue forward until we pass the last visible display row.
     while buffer_line < total && display_row <= last_visible_display_row {
         if visible(buffer_line) {
-            display_row += approx_display_rows_for_line(
-                &buffer.rope,
-                buffer_line,
-                approx_wrap_chars,
-            );
+            display_row +=
+                approx_display_rows_for_line(&buffer.rope, buffer_line, approx_wrap_chars);
         }
         buffer_line += 1;
     }
@@ -283,9 +276,8 @@ pub(crate) fn build_display_layout(
     let baseline_offset = font.font_size * 0.32;
     let total_buffer_lines = buffer.line_count();
 
-    let line_visible = |buffer_line: usize| -> bool {
-        hidden.map(|h| h.is_visible(buffer_line)).unwrap_or(true)
-    };
+    let line_visible =
+        |buffer_line: usize| -> bool { hidden.map(|h| h.is_visible(buffer_line)).unwrap_or(true) };
     let line_style_runs = |buffer_line: u32| -> Vec<RunWithText> {
         styles
             .and_then(|s| s.get(buffer_line))
@@ -299,25 +291,21 @@ pub(crate) fn build_display_layout(
     let scroll_dist = scroll.scroll_offset.abs();
     let start_pixels = scroll_dist - viewport.text_area_top - buf_px;
     let first_visible_display_row = (start_pixels / line_height).floor().max(0.0) as u32;
-    let visible_count =
-        ((viewport.height as f32 + buf_px * 2.0) / line_height).ceil() as u32;
+    let visible_count = ((viewport.height as f32 + buf_px * 2.0) / line_height).ceil() as u32;
     let last_visible_display_row = first_visible_display_row + visible_count;
 
     let approx_wrap_chars = wrap_budget_px.map(|px| (px / char_width).max(1.0) as usize);
     let fast_path_start = (first_visible_display_row as usize).min(total_buffer_lines);
-    let folding_in_play = approx_wrap_chars.is_none()
-        && (0..fast_path_start).any(|l| !line_visible(l));
+    let folding_in_play =
+        approx_wrap_chars.is_none() && (0..fast_path_start).any(|l| !line_visible(l));
     let (start_buffer_line, mut current_display_row) =
         if approx_wrap_chars.is_some() || folding_in_play {
             let mut display_row: u32 = 0;
             let mut buffer_line: usize = 0;
             while buffer_line < total_buffer_lines && display_row < first_visible_display_row {
                 if line_visible(buffer_line) {
-                    let rows = approx_display_rows_for_line(
-                        &buffer.rope,
-                        buffer_line,
-                        approx_wrap_chars,
-                    );
+                    let rows =
+                        approx_display_rows_for_line(&buffer.rope, buffer_line, approx_wrap_chars);
                     display_row += rows;
                 }
                 buffer_line += 1;
@@ -411,7 +399,10 @@ pub(crate) fn build_display_layout(
                     let row_shape = Arc::new(LineShape {
                         glyphs: row.glyphs.clone(),
                         width: row.width,
-                        font_size: shape.as_ref().map(|s| s.font_size).unwrap_or(font.font_size),
+                        font_size: shape
+                            .as_ref()
+                            .map(|s| s.font_size)
+                            .unwrap_or(font.font_size),
                     });
                     shaped_lines.push(ShapedLine {
                         display_row: current_display_row,
@@ -727,7 +718,11 @@ pub(crate) fn produce_block_layout(
             // Mirror of the editor's baseline-offset convention; ~32% of font size.
             baseline_offset: font.font_size * 0.32,
             default_fg: layout.default_fg,
-            default_wrap_chars: if wrap_chars > 0 { Some(wrap_chars as usize) } else { None },
+            default_wrap_chars: if wrap_chars > 0 {
+                Some(wrap_chars as usize)
+            } else {
+                None
+            },
         };
         *layout = Block::layout(&blocks.0, cfg);
         last_fingerprints.insert(entity, fingerprint);
@@ -828,6 +823,10 @@ mod tests {
 
         let layout = world.get::<DisplayLayout>(entity).unwrap();
         // 58 chars / 10-char budget → multiple wrap rows.
-        assert!(layout.lines.len() >= 2, "expected wrap, got {}", layout.lines.len());
+        assert!(
+            layout.lines.len() >= 2,
+            "expected wrap, got {}",
+            layout.lines.len()
+        );
     }
 }

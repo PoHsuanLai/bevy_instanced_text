@@ -44,7 +44,7 @@ pub struct TextViewRenderSet;
     LayoutTuning,
     Transform,
     Visibility,
-    bevy::picking::Pickable,
+    bevy::picking::Pickable
 )]
 pub struct TextView;
 
@@ -200,14 +200,24 @@ fn animate_text_view_scroll(
         };
 
         let needs_new_v = if has_v_anim {
-            let to = state.bypass_change_detection().vertical_anim.as_ref().unwrap().to;
+            let to = state
+                .bypass_change_detection()
+                .vertical_anim
+                .as_ref()
+                .unwrap()
+                .to;
             (to - target_v).abs() > f32::EPSILON
         } else {
             (target_v - scroll_v).abs() > 0.5
         };
 
         let needs_new_h = if has_h_anim {
-            let to = state.bypass_change_detection().horizontal_anim.as_ref().unwrap().to;
+            let to = state
+                .bypass_change_detection()
+                .horizontal_anim
+                .as_ref()
+                .unwrap()
+                .to;
             (to - target_h).abs() > f32::EPSILON
         } else {
             (target_h - scroll_h).abs() > 0.5
@@ -335,10 +345,12 @@ pub(crate) fn update_text_views(
                 viewport,
                 &mut atlas,
                 &fonts,
-                content_start_x,
-                scroll.horizontal_scroll_offset,
-                font.font_size,
-                faces,
+                super::render::RenderContext {
+                    content_start_x,
+                    horizontal_scroll_offset: scroll.horizontal_scroll_offset,
+                    font_size: font.font_size,
+                    faces,
+                },
             )
         };
 

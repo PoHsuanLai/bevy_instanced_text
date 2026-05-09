@@ -125,20 +125,22 @@ pub struct AnchorPoint {
 /// optional `DisplayLayout`, so layout-aware (soft-wrapped, folded)
 /// editors resolve correctly while trivial/un-laid-out editors still
 /// get a sensible monospace fallback.
+type BufferAnchorQuery<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static TextViewViewport,
+        &'static ScrollState,
+        &'static FontConfig,
+        &'static TextBuffer,
+        Option<&'static DisplayLayout>,
+    ),
+>;
+
 #[derive(SystemParam)]
 pub struct BufferAnchorParam<'w, 's> {
-    query: Query<
-        'w,
-        's,
-        (
-            Entity,
-            &'static TextViewViewport,
-            &'static ScrollState,
-            &'static FontConfig,
-            &'static TextBuffer,
-            Option<&'static DisplayLayout>,
-        ),
-    >,
+    query: BufferAnchorQuery<'w, 's>,
 }
 
 impl<'w, 's> BufferAnchorParam<'w, 's> {
@@ -155,21 +157,12 @@ impl<'w, 's> BufferAnchorParam<'w, 's> {
     /// Returns `None` only when the entity is missing a required
     /// component (`TextViewViewport`, `ScrollState`, `FontConfig`,
     /// `TextBuffer`).
-    pub fn at_buffer_pos(
-        &self,
-        entity: Entity,
-        line: u32,
-        character: u32,
-    ) -> Option<AnchorPoint> {
+    pub fn at_buffer_pos(&self, entity: Entity, line: u32, character: u32) -> Option<AnchorPoint> {
         let (_, viewport, scroll, font, _buffer, layout) = self.query.get(entity).ok()?;
         let metrics = build_metrics(viewport, scroll, font, layout);
 
-        let (display_row, pixel_x) = resolve_display_row_and_x(
-            line,
-            character as usize,
-            font,
-            layout,
-        );
+        let (display_row, pixel_x) =
+            resolve_display_row_and_x(line, character as usize, font, layout);
 
         Some(self.build_anchor(viewport, scroll, font, &metrics, display_row, pixel_x))
     }
@@ -178,11 +171,7 @@ impl<'w, 's> BufferAnchorParam<'w, 's> {
     /// `TextBuffer.rope`). Convenient for LSP popups whose state stores
     /// the trigger position as a rope offset rather than `(line,
     /// character)`.
-    pub fn at_rope_char_index(
-        &self,
-        entity: Entity,
-        char_index: usize,
-    ) -> Option<AnchorPoint> {
+    pub fn at_rope_char_index(&self, entity: Entity, char_index: usize) -> Option<AnchorPoint> {
         let (_, viewport, scroll, font, buffer, layout) = self.query.get(entity).ok()?;
         let metrics = build_metrics(viewport, scroll, font, layout);
 
@@ -196,12 +185,8 @@ impl<'w, 's> BufferAnchorParam<'w, 's> {
         // store positions as char-offsets, not a precise multibyte API.
         let byte_in_line = col_chars;
 
-        let (display_row, pixel_x) = resolve_display_row_and_x(
-            line_index as u32,
-            byte_in_line,
-            font,
-            layout,
-        );
+        let (display_row, pixel_x) =
+            resolve_display_row_and_x(line_index as u32, byte_in_line, font, layout);
 
         Some(self.build_anchor(viewport, scroll, font, &metrics, display_row, pixel_x))
     }
@@ -218,8 +203,7 @@ impl<'w, 's> BufferAnchorParam<'w, 's> {
         let line_height = font.line_height;
 
         // Top-down screen coords relative to the editor panel.
-        let screen_x =
-            viewport.text_area_left + pixel_x - scroll.horizontal_scroll_offset;
+        let screen_x = viewport.text_area_left + pixel_x - scroll.horizontal_scroll_offset;
         let screen_y = metrics.row_y_top(display_row);
 
         let screen_top_left = Vec2::new(screen_x, screen_y);
@@ -272,10 +256,12 @@ fn resolve_display_row_and_x(
     layout: Option<&DisplayLayout>,
 ) -> (u32, f32) {
     if let Some(layout) = layout {
-        if let Some((display_row, byte_in_row)) = layout.buffer_to_display(buffer_line, byte_in_line) {
+        if let Some((display_row, byte_in_row)) =
+            layout.buffer_to_display(buffer_line, byte_in_line)
+        {
             let pixel_x = layout
                 .x_at_byte(display_row, byte_in_row)
-                .unwrap_or_else(|| byte_in_row as f32 * font.char_width);
+                .unwrap_or(byte_in_row as f32 * font.char_width);
             return (display_row, pixel_x);
         }
     }
@@ -429,8 +415,8 @@ mod tests {
             font_synthesis: Default::default(),
         };
         let metrics = super::row_metrics_with_baseline(&viewport, &scroll, &font, 14.0 * 0.32);
-        let expected_screen_x = viewport.text_area_left + 3.0 * font.char_width
-            - scroll.horizontal_scroll_offset;
+        let expected_screen_x =
+            viewport.text_area_left + 3.0 * font.char_width - scroll.horizontal_scroll_offset;
         let expected_screen_y = metrics.row_y_top(1);
 
         assert!((anchor.screen_top_left.x - expected_screen_x).abs() < 1e-3);

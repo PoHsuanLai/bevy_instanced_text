@@ -247,9 +247,7 @@ impl RowMetrics {
     pub fn cell_glyph_band_top_left(&self, display_row: u32, column: u32) -> Vec2 {
         let band = self.row_glyph_band(display_row);
         Vec2::new(
-            self.world_left
-                + self.text_area_left
-                + column as f32 * self.char_width
+            self.world_left + self.text_area_left + column as f32 * self.char_width
                 - self.horizontal_scroll,
             band.max.y,
         )
@@ -352,18 +350,18 @@ impl<'w, 's> RowMetricsParam<'w, 's> {
     /// Iterate over every text view in the world, yielding
     /// `(entity, RowMetrics)` pairs. Useful for systems that operate
     /// across multiple editors (e.g. a global indent-guide pass).
-    pub fn iter(
-        &self,
-    ) -> impl Iterator<Item = (bevy::ecs::entity::Entity, RowMetrics)> + '_ {
-        self.query.iter().map(|(entity, viewport, scroll, font, layout)| {
-            let baseline = layout
-                .map(|l| l.baseline_offset)
-                .unwrap_or(font.font_size * DEFAULT_BASELINE_OFFSET_RATIO);
-            (
-                entity,
-                row_metrics_with_baseline(viewport, scroll, font, baseline),
-            )
-        })
+    pub fn iter(&self) -> impl Iterator<Item = (bevy::ecs::entity::Entity, RowMetrics)> + '_ {
+        self.query
+            .iter()
+            .map(|(entity, viewport, scroll, font, layout)| {
+                let baseline = layout
+                    .map(|l| l.baseline_offset)
+                    .unwrap_or(font.font_size * DEFAULT_BASELINE_OFFSET_RATIO);
+                (
+                    entity,
+                    row_metrics_with_baseline(viewport, scroll, font, baseline),
+                )
+            })
     }
 }
 
