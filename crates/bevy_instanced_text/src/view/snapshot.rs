@@ -83,11 +83,10 @@ pub struct StyleRun {
     /// bold-italic) face when one is loaded; otherwise (and when
     /// `FontConfig.font_synthesis.style` is on) it synthesizes via skew.
     pub italic: bool,
-    /// Font family name. `None` = layout default. `Arc<str>` so consumers can
-    /// reuse the same family pointer across many runs cheaply. Currently
-    /// informational: the renderer's per-entity font slots take precedence;
-    /// family-by-name resolution is a follow-up.
-    pub font_family: Option<Arc<str>>,
+    /// Override font for this run. When set, the renderer registers and shapes
+    /// with this handle instead of the entity's `FontConfig` slots. `None` =
+    /// use the entity default.
+    pub font: Option<bevy::asset::Handle<bevy::text::Font>>,
     /// Decoration drawn alongside the text (underline/strikethrough/squiggle).
     /// Currently informational; rendering pass landing in a follow-up phase.
     pub decoration: Option<TextDecoration>,
@@ -107,7 +106,7 @@ impl StyleRun {
             corner_radius: 0.0,
             font_weight: None,
             italic: false,
-            font_family: None,
+            font: None,
             decoration: None,
             link: None,
         }
@@ -694,7 +693,7 @@ mod tests {
             corner_radius: 0.0,
             font_weight: None,
             italic: false,
-            font_family: None,
+            font: None,
             decoration: None,
             link: None,
         }];

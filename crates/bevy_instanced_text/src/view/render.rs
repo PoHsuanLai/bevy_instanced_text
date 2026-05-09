@@ -155,6 +155,7 @@ pub fn render_layout(
     overlays: Option<&TextViewOverlays>,
     viewport: &TextViewViewport,
     atlas: &mut GlyphAtlas,
+    fonts: &bevy::asset::Assets<bevy::text::Font>,
     content_start_x: f32,
     horizontal_scroll_offset: f32,
     font_size: f32,
@@ -324,7 +325,11 @@ pub fn render_layout(
                 let bold = run_is_bold(run);
                 let italic = run.italic;
                 let (synth_bold, synth_italic) = faces.needs_synth(bold, italic);
-                let run_face = faces.pick(bold, italic);
+                let run_face = if let Some(ref handle) = run.font {
+                    atlas.ensure_font(handle, fonts)
+                } else {
+                    faces.pick(bold, italic)
+                };
 
                 // Synthesis: if no italic face is loaded, use the run's
                 // explicit skew or apply the synthetic-italic default.

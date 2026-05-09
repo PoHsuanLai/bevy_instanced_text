@@ -291,6 +291,7 @@ pub(crate) fn update_text_views(
             overlays,
             viewport,
             &mut atlas,
+            &fonts,
             content_start_x,
             scroll.horizontal_scroll_offset,
             font.font_size,

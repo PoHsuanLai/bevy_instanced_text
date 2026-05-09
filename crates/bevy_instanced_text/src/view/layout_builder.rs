@@ -618,7 +618,7 @@ pub fn slice_runs(runs: &[StyleRun], range: std::ops::Range<usize>) -> Vec<Style
             corner_radius: run.corner_radius,
             font_weight: run.font_weight,
             italic: run.italic,
-            font_family: run.font_family.clone(),
+            font: run.font.clone(),
             decoration: run.decoration,
             link: run.link.clone(),
         });
