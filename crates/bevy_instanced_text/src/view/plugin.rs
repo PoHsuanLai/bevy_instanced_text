@@ -15,7 +15,7 @@ use super::layout::DisplayLayout;
 use super::layout_builder::{produce_block_layout, produce_layouts, LayoutProduceSet};
 use super::overlay::TextViewOverlays;
 use super::render::{render_layout, GlyphBatchComponent, TextViewBatch};
-use super::state::{ContentMetrics, ScrollState, TextBuffer};
+use super::state::{CompositeStops, ContentMetrics, ScrollAnimation, ScrollState, TextBuffer};
 use super::styling::LayoutWrap;
 use super::theme::{BlockDecorTheme, RenderTheme};
 use super::tuning::LayoutTuning;
@@ -115,25 +115,117 @@ impl PluginGroup for InstancedTextPlugins {
     }
 }
 
-fn animate_text_view_scroll(mut query: Query<&mut ScrollState, With<TextView>>, time: Res<Time>) {
-    let dt = time.delta_secs();
-    let lerp_speed = 12.0; // exponential decay
+// -0.010: backdate so the first rendered frame already shows motion (VSCode does the same).
+const SCROLL_BACKDATE_SECS: f32 = -0.010;
+const COMPOSITE_SPLIT: f32 = 0.33;
+const COMPOSITE_VIEWPORT_THRESHOLD: f32 = 2.5;
+const COMPOSITE_STOP_INSET: f32 = 0.75;
 
-    for mut state in query.iter_mut() {
-        // Vertical scroll
-        let diff_v = state.target_scroll_offset - state.scroll_offset;
-        if diff_v.abs() > 0.5 {
-            state.scroll_offset += diff_v * (1.0 - (-lerp_speed * dt).exp());
-        } else if diff_v.abs() > 0.001 {
-            state.scroll_offset = state.target_scroll_offset;
+#[inline]
+fn ease_out_cubic(t: f32) -> f32 {
+    let inv = 1.0 - t;
+    1.0 - inv * inv * inv
+}
+
+#[inline]
+fn lerp(a: f32, b: f32, t: f32) -> f32 {
+    a + (b - a) * t
+}
+
+fn sample_animation(anim: &ScrollAnimation) -> f32 {
+    let t = (anim.elapsed / anim.duration).clamp(0.0, 1.0);
+    match &anim.composite {
+        None => lerp(anim.from, anim.to, ease_out_cubic(t)),
+        Some(c) => {
+            if t < c.split {
+                let local = t / c.split;
+                lerp(anim.from, c.stop1, ease_out_cubic(local))
+            } else {
+                let local = (t - c.split) / (1.0 - c.split);
+                lerp(c.stop2, anim.to, ease_out_cubic(local))
+            }
+        }
+    }
+}
+
+fn build_animation(from: f32, to: f32, duration: f32, viewport_size: f32) -> ScrollAnimation {
+    let composite = if viewport_size > 0.0
+        && (to - from).abs() > COMPOSITE_VIEWPORT_THRESHOLD * viewport_size
+    {
+        let inset = COMPOSITE_STOP_INSET * viewport_size;
+        let (stop1, stop2) = if from < to {
+            (from + inset, to - inset)
+        } else {
+            (from - inset, to + inset)
+        };
+        Some(CompositeStops {
+            stop1,
+            stop2,
+            split: COMPOSITE_SPLIT,
+        })
+    } else {
+        None
+    };
+    ScrollAnimation {
+        from,
+        to,
+        elapsed: SCROLL_BACKDATE_SECS,
+        duration: duration.max(0.001),
+        composite,
+    }
+}
+
+fn animate_text_view_scroll(
+    mut query: Query<(&mut ScrollState, &TextViewViewport), With<TextView>>,
+    time: Res<Time>,
+) {
+    let dt = time.delta_secs();
+
+    for (mut state, viewport) in query.iter_mut() {
+        let viewport_h = viewport.height as f32;
+        let viewport_w = viewport.width as f32;
+        let duration = state.smooth_scroll_duration;
+
+        let needs_new_v = match &state.vertical_anim {
+            Some(anim) => (anim.to - state.target_scroll_offset).abs() > f32::EPSILON,
+            None => (state.target_scroll_offset - state.scroll_offset).abs() > 0.5,
+        };
+        if needs_new_v {
+            let from = state.scroll_offset;
+            let to = state.target_scroll_offset;
+            state.vertical_anim = Some(build_animation(from, to, duration, viewport_h));
+        }
+        if let Some(mut anim) = state.vertical_anim.take() {
+            anim.elapsed += dt;
+            if anim.elapsed >= anim.duration {
+                state.scroll_offset = anim.to;
+                state.vertical_anim = None;
+            } else {
+                state.scroll_offset = sample_animation(&anim);
+                state.vertical_anim = Some(anim);
+            }
         }
 
-        // Horizontal scroll
-        let diff_h = state.target_horizontal_scroll_offset - state.horizontal_scroll_offset;
-        if diff_h.abs() > 0.5 {
-            state.horizontal_scroll_offset += diff_h * (1.0 - (-lerp_speed * dt).exp());
-        } else if diff_h.abs() > 0.001 {
-            state.horizontal_scroll_offset = state.target_horizontal_scroll_offset;
+        let needs_new_h = match &state.horizontal_anim {
+            Some(anim) => (anim.to - state.target_horizontal_scroll_offset).abs() > f32::EPSILON,
+            None => {
+                (state.target_horizontal_scroll_offset - state.horizontal_scroll_offset).abs() > 0.5
+            }
+        };
+        if needs_new_h {
+            let from = state.horizontal_scroll_offset;
+            let to = state.target_horizontal_scroll_offset;
+            state.horizontal_anim = Some(build_animation(from, to, duration, viewport_w));
+        }
+        if let Some(mut anim) = state.horizontal_anim.take() {
+            anim.elapsed += dt;
+            if anim.elapsed >= anim.duration {
+                state.horizontal_scroll_offset = anim.to;
+                state.horizontal_anim = None;
+            } else {
+                state.horizontal_scroll_offset = sample_animation(&anim);
+                state.horizontal_anim = Some(anim);
+            }
         }
     }
 }
