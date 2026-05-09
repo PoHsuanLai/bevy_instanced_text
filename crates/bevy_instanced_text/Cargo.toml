@@ -6,7 +6,7 @@ authors = ["PoHsuanLai"]
 license = "MIT OR Apache-2.0"
 readme = "README.md"
 description = "GPU-accelerated text rendering engine for Bevy. Provides primitives (glyph atlas, instanced rendering, DisplayLayout, overlays) for building editors, terminals, chat panels, log viewers, and any other text-heavy UI."
-repository = "https://github.com/PoHsuanLai/bevy_code_editor"
+repository = "https://github.com/PoHsuanLai/bevscode"
 keywords = ["bevy", "text", "rendering", "gpu", "engine"]
 categories = ["game-development", "rendering"]
 
