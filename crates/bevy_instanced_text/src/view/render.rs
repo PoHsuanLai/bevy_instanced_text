@@ -307,6 +307,8 @@ pub fn render_layout(
                     },
                     atlas,
                     faces.regular,
+                    false,
+                    false,
                     &mut text_instances,
                 );
             }
@@ -363,6 +365,8 @@ pub fn render_layout(
                             bg,
                             atlas,
                             run_face,
+                            bold,
+                            italic,
                             shape_usable,
                             &mut below_instances,
                             &mut text_instances,
@@ -377,6 +381,8 @@ pub fn render_layout(
                             seg_font_size,
                             atlas,
                             run_face,
+                            bold,
+                            italic,
                             shape_usable,
                             &mut text_instances,
                         );
@@ -391,6 +397,8 @@ pub fn render_layout(
                         seg_font_size,
                         atlas,
                         run_face,
+                        bold,
+                        italic,
                         shape_usable,
                         &mut text_instances,
                     );
@@ -540,15 +548,15 @@ fn emit_unshaped_run_glyphs(
     metrics: RunMetrics,
     atlas: &mut GlyphAtlas,
     font_id: Option<cosmic_text::fontdb::ID>,
+    bold: bool,
+    italic: bool,
     out: &mut Vec<GlyphInstance>,
 ) {
     let Some(slice) = line.text.get(range) else {
         return;
     };
-    // Strip a trailing newline — the rope line includes it but cosmic-text
-    // would just emit a zero-advance glyph. Matches the producer's behavior.
     let shape_text = slice.strip_suffix('\n').unwrap_or(slice);
-    let shape = atlas.shape_line(shape_text, metrics.font_size, font_id);
+    let shape = atlas.shape_line_styled(shape_text, metrics.font_size, font_id, bold, italic);
     for g in &shape.glyphs {
         let Some((info, _)) = atlas.get_or_rasterize_glyph(g.cache_key) else {
             continue;
@@ -575,6 +583,8 @@ fn emit_run_with_bg(
     bg: bevy::prelude::Color,
     atlas: &mut GlyphAtlas,
     run_face: Option<cosmic_text::fontdb::ID>,
+    bold: bool,
+    italic: bool,
     shape_usable: Option<&Arc<super::snapshot::LineShape>>,
     below: &mut Vec<GlyphInstance>,
     text: &mut Vec<GlyphInstance>,
@@ -608,6 +618,8 @@ fn emit_run_with_bg(
         seg_font_size,
         atlas,
         run_face,
+        bold,
+        italic,
         shape_usable,
         text,
     );
@@ -624,6 +636,8 @@ fn emit_run_glyphs_only(
     seg_font_size: f32,
     atlas: &mut GlyphAtlas,
     run_face: Option<cosmic_text::fontdb::ID>,
+    bold: bool,
+    italic: bool,
     shape_usable: Option<&Arc<super::snapshot::LineShape>>,
     out: &mut Vec<GlyphInstance>,
 ) {
@@ -648,6 +662,8 @@ fn emit_run_glyphs_only(
             },
             atlas,
             run_face,
+            bold,
+            italic,
             out,
         );
     }

@@ -423,19 +423,28 @@ mod instanced_extensions {
             font_size: f32,
             font_id: Option<cosmic_text::fontdb::ID>,
         ) -> crate::view::snapshot::LineShape {
+            self.shape_line_styled(text, font_size, font_id, false, false)
+        }
+
+        pub fn shape_line_styled(
+            &mut self,
+            text: &str,
+            font_size: f32,
+            font_id: Option<cosmic_text::fontdb::ID>,
+            bold: bool,
+            italic: bool,
+        ) -> crate::view::snapshot::LineShape {
             use crate::view::snapshot::{LineShape, ShapedGlyph};
 
             let pinned = font_id;
 
-            // Cache key: text + font_size + pinned font id.
-            // `font_size: f32` → bits to keep `Eq + Hash` honest (NaNs aren't
-            // produced here but bit-equality is what we want for "same size".)
             let key = {
                 let mut hasher = std::collections::hash_map::DefaultHasher::new();
                 text.hash(&mut hasher);
                 font_size.to_bits().hash(&mut hasher);
-                // `cosmic_text::fontdb::ID` impls Hash; hash `Option<ID>` directly.
                 pinned.hash(&mut hasher);
+                bold.hash(&mut hasher);
+                italic.hash(&mut hasher);
                 hasher.finish()
             };
 
@@ -454,6 +463,12 @@ mod instanced_extensions {
             });
             if let Some(ref family) = pinned_family {
                 attrs = attrs.family(cosmic_text::Family::Name(family.as_str()));
+            }
+            if bold {
+                attrs = attrs.weight(cosmic_text::fontdb::Weight::BOLD);
+            }
+            if italic {
+                attrs = attrs.style(cosmic_text::Style::Italic);
             }
             let attrs_list = AttrsList::new(attrs);
 
