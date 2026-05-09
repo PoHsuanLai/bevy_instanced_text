@@ -26,6 +26,7 @@ bevy = { version = "0.18", default-features = false, features = [
 bevy_camera = "0.18"
 
 ropey = "1.6"
+bitflags = "2"
 cosmic-text = "0.12"
 swash = "0.1"
 bytemuck = { version = "1.14", features = ["derive"] }

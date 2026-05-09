@@ -148,6 +148,10 @@ pub enum RowVertical {
     BottomBand { thickness: f32 },
     /// Underline below the typographic baseline (squiggle / error indicator).
     UnderBaseline { thickness: f32, gap: f32 },
+    /// Strikethrough at mid-cap height (between baseline and cap-top).
+    Strikethrough { thickness: f32 },
+    /// Underline just below the baseline.
+    Underline { thickness: f32, gap: f32 },
 }
 
 /// Where a display row sits within a multi-row span. Drives per-corner

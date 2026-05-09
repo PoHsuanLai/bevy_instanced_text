@@ -40,13 +40,16 @@ pub struct LineShape {
     pub font_size: f32,
 }
 
-/// Text decoration applied across a `StyleRun`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum TextDecoration {
-    Underline,
-    Strikethrough,
-    /// Wavy underline (typically for diagnostics).
-    Squiggle,
+bitflags::bitflags! {
+    /// Text decorations applied across a `StyleRun`. Flags can be combined
+    /// (e.g. `TextDecoration::UNDERLINE | TextDecoration::STRIKETHROUGH`).
+    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+    pub struct TextDecoration: u8 {
+        const UNDERLINE      = 0b001;
+        const STRIKETHROUGH  = 0b010;
+        /// Wavy underline (typically for diagnostics).
+        const SQUIGGLE       = 0b100;
+    }
 }
 
 /// A run of text within a shaped line that shares the same style.
@@ -87,9 +90,10 @@ pub struct StyleRun {
     /// with this handle instead of the entity's `FontConfig` slots. `None` =
     /// use the entity default.
     pub font: Option<bevy::asset::Handle<bevy::text::Font>>,
-    /// Decoration drawn alongside the text (underline/strikethrough/squiggle).
-    /// Currently informational; rendering pass landing in a follow-up phase.
-    pub decoration: Option<TextDecoration>,
+    /// Decorations drawn alongside the text. Combine flags freely:
+    /// `TextDecoration::UNDERLINE | TextDecoration::STRIKETHROUGH`.
+    /// `TextDecoration::empty()` means no decoration.
+    pub decoration: TextDecoration,
     /// URL or anchor target if this run is a link. Click handlers in the
     /// interaction layer can dispatch on this.
     pub link: Option<Arc<str>>,
@@ -107,7 +111,7 @@ impl StyleRun {
             font_weight: None,
             italic: false,
             font: None,
-            decoration: None,
+            decoration: TextDecoration::empty(),
             link: None,
         }
     }
@@ -694,7 +698,7 @@ mod tests {
             font_weight: None,
             italic: false,
             font: None,
-            decoration: None,
+            decoration: TextDecoration::empty(),
             link: None,
         }];
         let blocks = vec![Block::new(text).with_runs(runs)];
