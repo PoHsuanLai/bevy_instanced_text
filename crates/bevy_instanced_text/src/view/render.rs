@@ -16,7 +16,7 @@ use crate::gpu::GlyphAtlas;
 use super::font::FontSynthesis;
 use super::layout::{line_x_at_byte, DisplayLayout};
 use super::overlay::TextViewOverlays;
-use super::snapshot::{ShapedLine, StyleRun};
+use super::snapshot::{ShapedLine, StyleRun, TextDecoration};
 use super::viewport::TextViewViewport;
 
 /// Resolved font faces for one render call. The renderer picks per-run
@@ -405,6 +405,20 @@ pub fn render_layout(
                         bold,
                         italic,
                         shape_usable,
+                        &mut text_instances,
+                    );
+                }
+
+                if !run.decoration.is_empty() {
+                    emit_run_decoration(
+                        run.decoration,
+                        run.fg,
+                        anchor,
+                        line_height,
+                        baseline_offset,
+                        seg_x_start,
+                        seg_x_end,
+                        atlas.solid_uv,
                         &mut text_instances,
                     );
                 }
@@ -870,6 +884,15 @@ fn push_overlay_quad(
         super::overlay::RowVertical::UnderBaseline { thickness, gap } => {
             (baseline_y_off + gap, thickness.max(1.0))
         }
+        // Strikethrough: mid-cap height (~40% above baseline within the cap-to-descender band).
+        super::overlay::RowVertical::Strikethrough { thickness } => {
+            let t = thickness.max(1.0);
+            (baseline_y_off - cap_to_descender * 0.4, t)
+        }
+        // Underline: just below the baseline.
+        super::overlay::RowVertical::Underline { thickness, gap } => {
+            (baseline_y_off + gap, thickness.max(1.0))
+        }
     };
 
     let world_x = world_left + line_start_x + line.x_offset + x0;
@@ -900,4 +923,53 @@ fn push_overlay_quad(
 fn linear_rgba(color: Color) -> [f32; 4] {
     let l = color.to_linear();
     [l.red, l.green, l.blue, l.alpha]
+}
+
+/// Emit thin quads for each active `TextDecoration` flag on a run.
+/// `x_start`/`x_end` are line-local pixels from `line_byte_to_x` — the same
+/// coordinate space as selection `x_range`. Y is derived from `anchor.base_y`
+/// (the glyph baseline) using the same math as `push_overlay_quad`.
+fn emit_run_decoration(
+    decoration: TextDecoration,
+    fg: Color,
+    anchor: RowAnchor,
+    line_height: f32,
+    baseline_offset: f32,
+    x_start: f32,
+    x_end: f32,
+    solid_uv: crate::gpu::GlyphInfo,
+    out: &mut Vec<GlyphInstance>,
+) {
+    let thickness = (line_height * 0.07).max(1.0);
+    let color = linear_rgba(fg);
+    let width = (x_end - x_start).max(1.0);
+    // anchor.line_x already includes line_start_x + line.x_offset.
+    let world_x = anchor.viewport_world_left + anchor.line_x + x_start;
+
+    // Derive y_top from base_y: base_y = y_top + line_height*0.5 + baseline_offset
+    let y_top = anchor.base_y - line_height * 0.5 - baseline_offset;
+    let baseline_y_off = line_height * 0.5 + baseline_offset;
+    let cap_to_descender = baseline_y_off + baseline_offset * 0.6;
+
+    let mut push = |y_off: f32| {
+        let world_y = anchor.viewport_world_top - y_top - y_off - thickness;
+        out.push(GlyphInstance {
+            position: Vec2::new(world_x, world_y),
+            uv_min: solid_uv.uv_min,
+            uv_max: solid_uv.uv_max,
+            size: Vec2::new(width, thickness),
+            color,
+            z_index: 1.0,
+            corner_radii: [0.0; 4],
+            skew: 0.0,
+            _padding: [0.0; 2],
+        });
+    };
+
+    if decoration.contains(TextDecoration::STRIKETHROUGH) {
+        push(baseline_y_off - cap_to_descender * 0.4);
+    }
+    if decoration.contains(TextDecoration::UNDERLINE) {
+        push(baseline_y_off + thickness);
+    }
 }
