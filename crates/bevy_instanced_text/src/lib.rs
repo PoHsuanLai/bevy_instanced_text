@@ -59,8 +59,8 @@ pub mod prelude {
     pub use crate::gpu::{GlyphAtlasPlugin, InstancedTextRenderPlugin};
     pub use crate::view::{
         row_metrics, row_metrics_with_baseline, AnchorPoint, Block, BlockDecorTheme,
-        BlockLayoutConfig, BlockList, BufferAnchorParam, ContentMetrics, DisplayLayout,
-        CornerRadii, FontSynthesis, HiddenLines, InstancedTextPlugin, InstancedTextPlugins,
+        BlockLayoutConfig, BlockList, BufferAnchorParam, ContentMetrics, CornerRadii,
+        DisplayLayout, FontSynthesis, HiddenLines, InstancedTextPlugin, InstancedTextPlugins,
         LayoutWrap, LineStyles, RectOverlay, RowMetrics, RowMetricsParam, RowVertical, RunWithText,
         ScrollState, StyleRun, TextBackgroundColor, TextBuffer, TextColor, TextFont, TextView,
         TextViewOverlays, TextViewport,

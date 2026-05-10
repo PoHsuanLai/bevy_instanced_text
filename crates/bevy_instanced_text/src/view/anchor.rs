@@ -106,11 +106,7 @@ pub struct RowMetrics {
 /// [`row_metrics_with_baseline`] passing `layout.baseline_offset` — that
 /// stays byte-identical with the renderer even when the layout
 /// customizes the baseline.
-pub fn row_metrics(
-    viewport: &TextViewport,
-    scroll: &ScrollState,
-    font: &TextFont,
-) -> RowMetrics {
+pub fn row_metrics(viewport: &TextViewport, scroll: &ScrollState, font: &TextFont) -> RowMetrics {
     row_metrics_with_baseline(
         viewport,
         scroll,
