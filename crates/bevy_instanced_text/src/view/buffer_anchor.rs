@@ -67,10 +67,10 @@ use bevy::ecs::system::{Query, SystemParam};
 use bevy::math::Vec2;
 
 use super::anchor::{row_metrics_with_baseline, RowMetrics, DEFAULT_BASELINE_OFFSET_RATIO};
-use super::font::FontConfig;
+use super::font::TextFont;
 use super::layout::DisplayLayout;
 use super::state::{ScrollState, TextBuffer};
-use super::viewport::TextViewViewport;
+use super::viewport::TextViewport;
 
 /// Resolved screen / world coordinates for a buffer position.
 ///
@@ -130,9 +130,9 @@ type BufferAnchorQuery<'w, 's> = Query<
     's,
     (
         Entity,
-        &'static TextViewViewport,
+        &'static TextViewport,
         &'static ScrollState,
-        &'static FontConfig,
+        &'static TextFont,
         &'static TextBuffer,
         Option<&'static DisplayLayout>,
     ),
@@ -155,7 +155,7 @@ impl<'w, 's> BufferAnchorParam<'w, 's> {
     /// UTF-16→byte conversion before calling here.
     ///
     /// Returns `None` only when the entity is missing a required
-    /// component (`TextViewViewport`, `ScrollState`, `FontConfig`,
+    /// component (`TextViewport`, `ScrollState`, `TextFont`,
     /// `TextBuffer`).
     pub fn at_buffer_pos(&self, entity: Entity, line: u32, character: u32) -> Option<AnchorPoint> {
         let (_, viewport, scroll, font, _buffer, layout) = self.query.get(entity).ok()?;
@@ -193,9 +193,9 @@ impl<'w, 's> BufferAnchorParam<'w, 's> {
 
     fn build_anchor(
         &self,
-        viewport: &TextViewViewport,
+        viewport: &TextViewport,
         scroll: &ScrollState,
-        font: &FontConfig,
+        font: &TextFont,
         metrics: &RowMetrics,
         display_row: u32,
         pixel_x: f32,
@@ -238,9 +238,9 @@ impl<'w, 's> BufferAnchorParam<'w, 's> {
 }
 
 fn build_metrics(
-    viewport: &TextViewViewport,
+    viewport: &TextViewport,
     scroll: &ScrollState,
-    font: &FontConfig,
+    font: &TextFont,
     layout: Option<&DisplayLayout>,
 ) -> RowMetrics {
     let baseline = layout
@@ -252,7 +252,7 @@ fn build_metrics(
 fn resolve_display_row_and_x(
     buffer_line: u32,
     byte_in_line: usize,
-    font: &FontConfig,
+    font: &TextFont,
     layout: Option<&DisplayLayout>,
 ) -> (u32, f32) {
     if let Some(layout) = layout {
@@ -272,6 +272,7 @@ fn resolve_display_row_and_x(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::view::font::TextFont;
     use crate::view::layout::DisplayLayout;
     use bevy::asset::Handle;
     use bevy::ecs::system::RunSystemOnce;
@@ -279,7 +280,7 @@ mod tests {
     use bevy::prelude::*;
 
     fn make_editor_world() -> (World, Entity) {
-        let viewport = TextViewViewport {
+        let viewport = TextViewport {
             width: 800,
             height: 600,
             hit_test_position: Vec2::ZERO,
@@ -294,7 +295,7 @@ mod tests {
             target_horizontal_scroll_offset: 0.0,
             ..Default::default()
         };
-        let font = FontConfig {
+        let font = TextFont {
             font: Handle::default(),
             font_size: 14.0,
             line_height: 21.0,
@@ -304,7 +305,7 @@ mod tests {
             font_bold_italic: None,
             font_synthesis: Default::default(),
         };
-        let buffer = TextBuffer::with_text("hello world\nsecond line\nthird");
+        let buffer = TextBuffer::new("hello world\nsecond line\nthird");
         let mut layout = DisplayLayout::default();
         layout.baseline_offset = 14.0 * 0.32;
 
@@ -342,7 +343,7 @@ mod tests {
     /// `cursor_screen_pos` used pre-API.
     #[test]
     fn fallback_uses_monospace_columns() {
-        let viewport = TextViewViewport {
+        let viewport = TextViewport {
             width: 800,
             height: 600,
             hit_test_position: Vec2::ZERO,
@@ -351,7 +352,7 @@ mod tests {
             gutter_width: 40.0,
         };
         let scroll = ScrollState::default();
-        let font = FontConfig {
+        let font = TextFont {
             font: Handle::default(),
             font_size: 14.0,
             line_height: 21.0,
@@ -361,7 +362,7 @@ mod tests {
             font_bold_italic: None,
             font_synthesis: Default::default(),
         };
-        let buffer = TextBuffer::with_text("plain text");
+        let buffer = TextBuffer::new("plain text");
 
         let mut world = World::new();
         let entity = world.spawn((viewport, scroll, font, buffer)).id();
@@ -389,7 +390,7 @@ mod tests {
             .unwrap();
 
         // Legacy formula from examples/editor_lsp.rs::cursor_screen_pos.
-        let viewport = TextViewViewport {
+        let viewport = TextViewport {
             width: 800,
             height: 600,
             hit_test_position: Vec2::ZERO,
@@ -404,7 +405,7 @@ mod tests {
             target_horizontal_scroll_offset: 0.0,
             ..Default::default()
         };
-        let font = FontConfig {
+        let font = TextFont {
             font: Handle::default(),
             font_size: 14.0,
             line_height: 21.0,
@@ -435,7 +436,7 @@ mod tests {
             })
             .unwrap();
 
-        let viewport = TextViewViewport {
+        let viewport = TextViewport {
             width: 800,
             height: 600,
             hit_test_position: Vec2::ZERO,
@@ -450,7 +451,7 @@ mod tests {
             target_horizontal_scroll_offset: 0.0,
             ..Default::default()
         };
-        let font = FontConfig {
+        let font = TextFont {
             font: Handle::default(),
             font_size: 14.0,
             line_height: 21.0,

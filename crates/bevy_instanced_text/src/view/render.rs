@@ -17,7 +17,7 @@ use super::font::FontSynthesis;
 use super::layout::{line_x_at_byte, DisplayLayout};
 use super::overlay::TextViewOverlays;
 use super::snapshot::{ShapedLine, StyleRun, TextDecoration};
-use super::viewport::TextViewViewport;
+use super::viewport::TextViewport;
 
 /// Resolved font faces for one render call. The renderer picks per-run
 /// based on `StyleRun.font_weight` (≥600 ⇒ bold) and `StyleRun.italic`,
@@ -25,7 +25,7 @@ use super::viewport::TextViewViewport;
 /// `synthesis` permits.
 ///
 /// Built once per text-view per frame in `update_text_views`
-/// from the entity's `FontConfig` (each `Handle<Font>` is registered with
+/// from the entity's `TextFont` (each `Handle<Font>` is registered with
 /// the atlas's cosmic-text font system on first use).
 #[derive(Clone, Copy, Debug, Default)]
 pub struct FontFaces {
@@ -152,7 +152,7 @@ pub struct RenderContext {
 pub fn render_layout(
     layout: &DisplayLayout,
     overlays: Option<&TextViewOverlays>,
-    viewport: &TextViewViewport,
+    viewport: &TextViewport,
     atlas: &mut GlyphAtlas,
     fonts: &bevy::asset::Assets<bevy::text::Font>,
     ctx: RenderContext,
@@ -705,7 +705,7 @@ fn emit_run_glyphs_only(
 /// available width like markdown / chat consumers expect.
 fn push_block_decorations(
     layout: &DisplayLayout,
-    viewport: &TextViewViewport,
+    viewport: &TextViewport,
     world_left: f32,
     world_top: f32,
     content_start_x: f32,

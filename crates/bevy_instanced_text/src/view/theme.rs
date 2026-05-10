@@ -2,27 +2,46 @@
 //!
 //! Background and foreground belong to the rendering substrate: a terminal
 //! wants them, a markdown viewer wants them, the editor wants them. Cursor
-//! and selection colors live on `bevy_instanced_text_edit::EditTheme` (edit-tier);
+//! and selection colors live on `bevy_instanced_text_edit` (edit-tier);
 //! line-numbers / brackets / indent-guides live on the editor crate
 //! (editor-tier).
 
 use bevy::prelude::*;
 
-/// Per-entity background and foreground colors for the text rendering substrate.
-/// Shared by editors, terminals, markdown viewers — anything that renders styled text.
-#[derive(Component, Clone, Debug, Reflect)]
+const DEFAULT_FG: Color = Color::srgb(0.827, 0.827, 0.827);
+const DEFAULT_BG: Color = Color::srgb(0.117, 0.117, 0.117);
+
+/// Text foreground color.
+#[derive(Component, Clone, Copy, Debug, Reflect, Deref, DerefMut)]
 #[reflect(Component, Default, Debug)]
-pub struct RenderTheme {
-    pub background: Color,
-    pub foreground: Color,
+pub struct TextColor(pub Color);
+
+impl Default for TextColor {
+    fn default() -> Self {
+        Self(DEFAULT_FG)
+    }
 }
 
-impl Default for RenderTheme {
+impl<T: Into<Color>> From<T> for TextColor {
+    fn from(color: T) -> Self {
+        Self(color.into())
+    }
+}
+
+/// Text background (canvas) color.
+#[derive(Component, Clone, Copy, Debug, Reflect, Deref, DerefMut)]
+#[reflect(Component, Default, Debug)]
+pub struct TextBackgroundColor(pub Color);
+
+impl Default for TextBackgroundColor {
     fn default() -> Self {
-        Self {
-            background: Color::srgb(0.117, 0.117, 0.117),
-            foreground: Color::srgb(0.827, 0.827, 0.827),
-        }
+        Self(DEFAULT_BG)
+    }
+}
+
+impl<T: Into<Color>> From<T> for TextBackgroundColor {
+    fn from(color: T) -> Self {
+        Self(color.into())
     }
 }
 

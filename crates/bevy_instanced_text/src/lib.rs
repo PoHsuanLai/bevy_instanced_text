@@ -10,9 +10,9 @@
 //! A **[`TextView`]** is the entity marker. Pair it with:
 //!
 //! - **[`TextBuffer`]** — the rope-backed text content and a version counter.
-//! - **[`TextViewViewport`]** — size, scroll offsets, and gutter geometry.
-//! - **[`FontConfig`]** — font path, size, and line height.
-//! - **[`RenderTheme`]** — background and foreground colors.
+//! - **[`TextViewport`]** — size, scroll offsets, and gutter geometry.
+//! - **[`TextFont`]** — font path, size, and line height.
+//! - **[`TextColor`]** / **[`TextBackgroundColor`]** — foreground and background colors.
 //! - **[`LineStyles`]** — per-line [`StyleRun`] lists (colors, bold, italic,
 //!   inline backgrounds). Producers write this; the engine reads it.
 //! - **[`HiddenLines`]** — which buffer lines to skip (e.g. folded regions).
@@ -40,9 +40,9 @@
 //!     .add_systems(Startup, |mut commands: Commands| {
 //!         commands.spawn((
 //!             TextView,
-//!             TextBuffer::with_text("hello world"),
-//!             TextViewViewport::default(),
-//!             FontConfig::default(),
+//!             TextBuffer::new("hello world"),
+//!             TextViewport::default(),
+//!             TextFont::default(),
 //!         ));
 //!     })
 //!     .run();
@@ -59,9 +59,10 @@ pub mod prelude {
     pub use crate::gpu::{GlyphAtlasPlugin, InstancedTextRenderPlugin};
     pub use crate::view::{
         row_metrics, row_metrics_with_baseline, AnchorPoint, Block, BlockDecorTheme,
-        BlockLayoutConfig, BlockList, BufferAnchorParam, ContentMetrics, DisplayLayout, FontConfig,
-        FontSynthesis, HiddenLines, InstancedTextPlugin, InstancedTextPlugins, LayoutWrap,
-        LineStyles, RenderTheme, RowMetrics, RowMetricsParam, RunWithText, ScrollState, StyleRun,
-        TextBuffer, TextView, TextViewViewport,
+        BlockLayoutConfig, BlockList, BufferAnchorParam, ContentMetrics, DisplayLayout,
+        CornerRadii, FontSynthesis, HiddenLines, InstancedTextPlugin, InstancedTextPlugins,
+        LayoutWrap, LineStyles, RectOverlay, RowMetrics, RowMetricsParam, RowVertical, RunWithText,
+        ScrollState, StyleRun, TextBackgroundColor, TextBuffer, TextColor, TextFont, TextView,
+        TextViewOverlays, TextViewport,
     };
 }

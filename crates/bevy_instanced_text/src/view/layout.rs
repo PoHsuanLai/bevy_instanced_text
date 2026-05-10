@@ -85,7 +85,7 @@ impl DisplayLayout {
     /// is the row's pre-computed top edge in layout-local coords.
     ///
     /// Hosts wanting world-space coordinates add the
-    /// [`super::viewport::TextViewViewport`] origin themselves — this
+    /// [`super::viewport::TextViewport`] origin themselves — this
     /// helper stays viewport-agnostic so it works for hosts that compose
     /// multiple viewports / RenderLayers.
     ///

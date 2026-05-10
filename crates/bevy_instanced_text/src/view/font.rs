@@ -4,16 +4,10 @@
 use bevy::prelude::*;
 use bevy::text::Font;
 
-/// Per-entity font configuration.
-///
-/// Field names mirror Bevy's [`bevy::text::TextFont`] (`font`, `font_size`) so
-/// spawn-site syntax matches Bevy text. Multi-face slots (`font_bold`,
-/// `font_italic`, `font_bold_italic`) and synthesis are layered on top —
-/// Bevy doesn't bundle multi-face natively. `line_height` / `char_width`
-/// are layout metrics the renderer falls back to when shaping is off.
+/// Per-entity font configuration: face handles, size, line height, and synthesis settings.
 #[derive(Component, Clone, Debug, Reflect)]
 #[reflect(Component, Default, Debug)]
-pub struct FontConfig {
+pub struct TextFont {
     pub font: Handle<Font>,
     pub font_size: f32,
     pub line_height: f32,
@@ -24,18 +18,10 @@ pub struct FontConfig {
     pub font_synthesis: FontSynthesis,
 }
 
-/// Whether (and how) to synthesize a bold / italic face when the
-/// matching slot on [`FontConfig`] is empty. `weight` / `style` toggles
-/// match CSS Fonts L4 `font-synthesis: weight style`. The `*_amount`
-/// fields tune the synthesis intensity:
+/// Faux bold/italic synthesis settings for when a dedicated font face isn't provided.
 ///
-/// - `bold_stroke_px`: faux-bold draws each glyph twice with this
-///   x-offset. ~0.6 px gives a noticeable weight bump without smearing
-///   text — the value typical browsers use for faux-bold. Scale up for
-///   very large display sizes if results look thin.
-/// - `italic_skew`: faux-italic shears glyphs by this slope (rise/run).
-///   ~0.21 (~12°) is the angle FreeType's slant transform and most
-///   browsers apply.
+/// `bold_stroke_px`: x-offset used to double-draw glyphs for faux bold (~0.6 px).
+/// `italic_skew`: shear slope for faux italic (~0.21 ≈ 12°).
 #[derive(Clone, Copy, Debug, PartialEq, Reflect)]
 #[reflect(Default, Debug)]
 pub struct FontSynthesis {
@@ -56,17 +42,14 @@ impl Default for FontSynthesis {
     }
 }
 
-impl Default for FontConfig {
+impl Default for TextFont {
     fn default() -> Self {
-        Self::from_size(14.0)
+        Self::from_font_size(14.0)
     }
 }
 
-impl FontConfig {
-    /// `line_height = font_size * 1.5`, `char_width = font_size * 0.6`,
-    /// `font = Handle::default()` (Bevy's FiraMono-subset when the
-    /// `default_font` feature is enabled).
-    pub fn from_size(font_size: f32) -> Self {
+impl TextFont {
+    pub fn from_font_size(font_size: f32) -> Self {
         Self {
             font: Handle::default(),
             font_size,
@@ -119,9 +102,7 @@ impl FontConfig {
         self
     }
 
-    /// Resolve a handle for `(bold, italic)`, falling back to the closest
-    /// available face. Caller applies synthesis when the regular face is
-    /// returned for a styled request.
+    /// Returns the best available face handle for `(bold, italic)`, falling back toward regular.
     pub fn font_for(&self, bold: bool, italic: bool) -> &Handle<Font> {
         match (bold, italic) {
             (true, true) => self

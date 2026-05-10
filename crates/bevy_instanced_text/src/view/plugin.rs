@@ -10,16 +10,16 @@
 use bevy::app::{PluginGroup, PluginGroupBuilder};
 use bevy::prelude::*;
 
-use super::font::FontConfig;
+use super::font::TextFont;
 use super::layout::DisplayLayout;
 use super::layout_builder::{produce_block_layout, produce_layouts, LayoutProduceSet};
 use super::overlay::TextViewOverlays;
 use super::render::{render_layout, GlyphBatchComponent, TextViewBatch};
 use super::state::{CompositeStops, ContentMetrics, ScrollAnimation, ScrollState, TextBuffer};
 use super::styling::LayoutWrap;
-use super::theme::{BlockDecorTheme, RenderTheme};
+use super::theme::{BlockDecorTheme, TextBackgroundColor, TextColor};
 use super::tuning::LayoutTuning;
-use super::viewport::TextViewViewport;
+use super::viewport::TextViewport;
 use crate::gpu::{atlas_ready, GlyphAtlas, GlyphAtlasPlugin, InstancedTextRenderPlugin};
 
 /// Contains `update_text_views`. Order downstream `.after(TextViewRenderSet)`.
@@ -36,10 +36,10 @@ pub struct TextViewRenderSet;
     TextBuffer,
     ScrollState,
     ContentMetrics,
-    TextViewViewport,
+    TextViewport,
     DisplayLayout,
     TextViewOverlays,
-    FontConfig,
+    TextFont,
     LayoutWrap,
     LayoutTuning,
     Transform,
@@ -62,11 +62,12 @@ impl Plugin for InstancedTextPlugin {
     fn build(&self, app: &mut App) {
         app.register_type::<LayoutTuning>();
 
-        app.register_type::<FontConfig>()
+        app.register_type::<TextFont>()
             .register_type::<super::overlay::RectOverlay>()
             .register_type::<super::overlay::RowVertical>()
             .register_type::<LayoutWrap>()
-            .register_type::<RenderTheme>()
+            .register_type::<TextColor>()
+            .register_type::<TextBackgroundColor>()
             .register_type::<BlockDecorTheme>()
             .register_type::<TextView>()
             .register_type::<TextViewBatchEntity>()
@@ -74,7 +75,7 @@ impl Plugin for InstancedTextPlugin {
             .register_type::<TextBuffer>()
             .register_type::<ScrollState>()
             .register_type::<ContentMetrics>()
-            .register_type::<TextViewViewport>()
+            .register_type::<TextViewport>()
             .register_type::<super::viewport::ViewportOrigin>();
 
         app.add_systems(
@@ -176,7 +177,7 @@ fn build_animation(from: f32, to: f32, duration: f32, viewport_size: f32) -> Scr
 }
 
 fn animate_text_view_scroll(
-    mut query: Query<(&mut ScrollState, &TextViewViewport), With<TextView>>,
+    mut query: Query<(&mut ScrollState, &TextViewport), With<TextView>>,
     time: Res<Time>,
 ) {
     let dt = time.delta_secs();
@@ -287,8 +288,8 @@ pub(crate) fn update_text_views(
         (
             Entity,
             &ScrollState,
-            &TextViewViewport,
-            &FontConfig,
+            &TextViewport,
+            &TextFont,
             Ref<DisplayLayout>,
             Option<Ref<TextViewOverlays>>,
             Option<&TextViewBatchEntity>,

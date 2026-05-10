@@ -32,9 +32,10 @@
 //! ```no_run
 //! # use bevy::prelude::*;
 //! # use bevy_instanced_text::prelude::*;
+//! # use bevy_instanced_text::TextFont;
 //! # use bevy_instanced_text::view::anchor::row_metrics;
 //! fn position_my_popup(
-//!     editor: Query<(&TextViewViewport, &ScrollState, &FontConfig, &DisplayLayout)>,
+//!     editor: Query<(&TextViewport, &ScrollState, &TextFont, &DisplayLayout)>,
 //! ) {
 //!     let (viewport, scroll, font, layout) = editor.single().unwrap();
 //!     let metrics = row_metrics(viewport, scroll, font);
@@ -50,11 +51,11 @@
 
 use bevy::math::{Rect, Vec2};
 
-use super::font::FontConfig;
+use super::font::TextFont;
 use super::state::ScrollState;
-use super::viewport::TextViewViewport;
+use super::viewport::TextViewport;
 
-/// Default baseline-offset ratio matching `FontConfig::from_size` /
+/// Default baseline-offset ratio matching `TextFont::from_size` /
 /// `layout_builder` defaults: ~32% of font size. Consumers that don't
 /// have a `DisplayLayout` on hand can pass this into
 /// [`row_metrics_with_baseline`] (or just call [`row_metrics`] which
@@ -82,7 +83,7 @@ pub struct RowMetrics {
     /// Viewport content width in pixels. Used by `row_*_box` helpers for
     /// viewport-spanning rects.
     viewport_width: f32,
-    /// Pixel width of one monospace cell (`FontConfig.char_width`).
+    /// Pixel width of one monospace cell (`TextFont.char_width`).
     char_width: f32,
     /// Pixel height of a row's leaded box. Per-row overrides
     /// (`ShapedLine.line_height`) are accepted via the `_with_height`
@@ -106,9 +107,9 @@ pub struct RowMetrics {
 /// stays byte-identical with the renderer even when the layout
 /// customizes the baseline.
 pub fn row_metrics(
-    viewport: &TextViewViewport,
+    viewport: &TextViewport,
     scroll: &ScrollState,
-    font: &FontConfig,
+    font: &TextFont,
 ) -> RowMetrics {
     row_metrics_with_baseline(
         viewport,
@@ -121,9 +122,9 @@ pub fn row_metrics(
 /// As [`row_metrics`] but lets the caller pass an explicit
 /// `baseline_offset` (e.g. read from `DisplayLayout::baseline_offset`).
 pub fn row_metrics_with_baseline(
-    viewport: &TextViewViewport,
+    viewport: &TextViewport,
     scroll: &ScrollState,
-    font: &FontConfig,
+    font: &TextFont,
     baseline_offset: f32,
 ) -> RowMetrics {
     RowMetrics {
@@ -313,9 +314,9 @@ pub struct RowMetricsParam<'w, 's> {
         's,
         (
             bevy::ecs::entity::Entity,
-            &'static TextViewViewport,
+            &'static TextViewport,
             &'static ScrollState,
-            &'static FontConfig,
+            &'static TextFont,
             Option<&'static super::layout::DisplayLayout>,
         ),
     >,
@@ -324,7 +325,7 @@ pub struct RowMetricsParam<'w, 's> {
 impl<'w, 's> RowMetricsParam<'w, 's> {
     /// Build a `RowMetrics` snapshot for the given editor entity.
     /// Returns `None` when the entity is missing a required component
-    /// (`TextViewViewport`, `ScrollState`, or `FontConfig`).
+    /// (`TextViewport`, `ScrollState`, or `TextFont`).
     pub fn get(&self, entity: bevy::ecs::entity::Entity) -> Option<RowMetrics> {
         let (_, viewport, scroll, font, layout) = self.query.get(entity).ok()?;
         let baseline = layout
@@ -341,7 +342,7 @@ impl<'w, 's> RowMetricsParam<'w, 's> {
         self.get(entity).unwrap_or_else(|| {
             panic!(
                 "RowMetricsParam: entity {:?} is missing one of \
-                 (TextViewViewport, ScrollState, FontConfig)",
+                 (TextViewport, ScrollState, TextFont)",
                 entity
             )
         })
@@ -372,7 +373,7 @@ mod tests {
     use bevy::asset::Handle;
 
     fn make_metrics() -> RowMetrics {
-        let viewport = TextViewViewport {
+        let viewport = TextViewport {
             width: 800,
             height: 600,
             hit_test_position: Vec2::ZERO,
@@ -387,7 +388,7 @@ mod tests {
             target_horizontal_scroll_offset: 0.0,
             ..Default::default()
         };
-        let font = FontConfig {
+        let font = TextFont {
             font: Handle::default(),
             font_size: 14.0,
             line_height: 21.0,
@@ -397,7 +398,7 @@ mod tests {
             font_bold_italic: None,
             font_synthesis: Default::default(),
         };
-        // baseline_offset matching FontConfig::from_size / layout default.
+        // baseline_offset matching TextFont::from_size / layout default.
         row_metrics_with_baseline(&viewport, &scroll, &font, 14.0 * 0.32)
     }
 
@@ -492,12 +493,13 @@ mod tests {
     /// separate code path; this test ensures it stays that way.
     #[test]
     fn system_param_matches_direct_call() {
+        use crate::view::font::TextFont;
         use crate::view::layout::DisplayLayout;
         use bevy::ecs::system::RunSystemOnce;
         use bevy::prelude::*;
 
         let mut world = World::new();
-        let viewport = TextViewViewport {
+        let viewport = TextViewport {
             width: 800,
             height: 600,
             hit_test_position: Vec2::ZERO,
@@ -512,7 +514,7 @@ mod tests {
             target_horizontal_scroll_offset: 0.0,
             ..Default::default()
         };
-        let font = FontConfig {
+        let font = TextFont {
             font: Handle::default(),
             font_size: 14.0,
             line_height: 21.0,

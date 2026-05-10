@@ -17,13 +17,13 @@ use bevy::prelude::*;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use super::font::FontConfig;
+use super::font::TextFont;
 use super::layout::DisplayLayout;
 use super::plugin::TextView;
 use super::snapshot::{Block, BlockLayoutConfig, LineShape, ShapedGlyph, ShapedLine, StyleRun};
 use super::state::{ContentMetrics, ScrollState, TextBuffer};
 use super::styling::{BlockList, HiddenLines, LayoutWrap, LineStyles, RunWithText};
-use super::viewport::TextViewViewport;
+use super::viewport::TextViewport;
 use crate::gpu::GlyphAtlas;
 
 /// Default extra rows kept above and below the visible window.
@@ -64,8 +64,8 @@ pub(crate) struct LayoutFingerprint {
 pub fn visible_buffer_range(
     buffer: &TextBuffer,
     scroll: &ScrollState,
-    viewport: &TextViewViewport,
-    font: &FontConfig,
+    viewport: &TextViewport,
+    font: &TextFont,
     wrap: LayoutWrap,
     hidden: Option<&HiddenLines>,
 ) -> std::ops::Range<usize> {
@@ -127,8 +127,8 @@ pub(crate) fn produce_layouts(
             &TextBuffer,
             &ScrollState,
             &mut ContentMetrics,
-            &TextViewViewport,
-            &FontConfig,
+            &TextViewport,
+            &TextFont,
             &mut DisplayLayout,
             Option<&HiddenLines>,
             Option<&LineStyles>,
@@ -257,8 +257,8 @@ pub(crate) fn build_display_layout(
     buffer: &TextBuffer,
     scroll: &ScrollState,
     metrics: &mut ContentMetrics,
-    viewport: &TextViewViewport,
-    font: &FontConfig,
+    viewport: &TextViewport,
+    font: &TextFont,
     wrap: LayoutWrap,
     default_fg: Color,
     hidden: Option<&HiddenLines>,
@@ -676,7 +676,7 @@ pub(crate) fn produce_block_layout(
         (
             Entity,
             &BlockList,
-            &FontConfig,
+            &TextFont,
             &mut DisplayLayout,
             Option<&LayoutWrap>,
         ),
@@ -749,7 +749,7 @@ mod tests {
         let entity = world
             .spawn((
                 TextView,
-                FontConfig::from_size(16.0),
+                TextFont::from_font_size(16.0),
                 DisplayLayout::default(),
                 BlockList::new(blocks),
             ))
@@ -776,7 +776,7 @@ mod tests {
         let entity = world
             .spawn((
                 TextView,
-                FontConfig::from_size(16.0),
+                TextFont::from_font_size(16.0),
                 DisplayLayout::default(),
                 BlockList::new(vec![Block::new("once")]),
             ))
@@ -795,12 +795,12 @@ mod tests {
 
     /// `BlockList` Component cooperates with `LayoutWrap`: the system
     /// translates `LayoutWrap.budget_px` into a char budget via
-    /// `FontConfig.char_width` and applies it as the default wrap.
+    /// `TextFont.char_width` and applies it as the default wrap.
     #[test]
     fn produce_block_layout_honors_layout_wrap() {
         let mut world = World::new();
         // 16px font, char_width = 8px, budget_px = 80px → 10-char budget.
-        let mut font = FontConfig::from_size(16.0);
+        let mut font = TextFont::from_font_size(16.0);
         font.char_width = 8.0;
         let entity = world
             .spawn((

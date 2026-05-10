@@ -83,7 +83,7 @@ pub struct GlyphAtlas {
 }
 
 /// Default FIFO cap on the shaped-line cache. Override via
-/// Override via `PerformanceSettings::viewport_buffer_lines` on the editor entity.
+/// Override via `Performance::viewport_buffer_lines` on the editor entity.
 pub const DEFAULT_SHAPE_CACHE_CAPACITY: usize = 8192;
 
 impl GlyphAtlas {

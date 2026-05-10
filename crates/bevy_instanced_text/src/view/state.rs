@@ -26,7 +26,7 @@ impl Default for TextBuffer {
 }
 
 impl TextBuffer {
-    pub fn with_text(text: &str) -> Self {
+    pub fn new(text: &str) -> Self {
         Self {
             rope: Rope::from_str(text),
             content_version: 1,

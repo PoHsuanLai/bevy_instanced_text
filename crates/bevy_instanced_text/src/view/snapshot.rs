@@ -74,20 +74,20 @@ pub struct StyleRun {
     /// Set explicitly to force a skew regardless of italic-face availability;
     /// the renderer also writes this when `italic = true` and no italic face
     /// is loaded (synthetic italic, controlled by
-    /// `FontConfig.font_synthesis.style`).
+    /// `TextFont.font_synthesis.style`).
     pub skew: f32,
     pub corner_radius: f32,
     /// Font weight (100..=900). `None` = layout default. The renderer maps
     /// `Some(w >= 600)` to the entity's bold face when one is loaded;
-    /// otherwise (and when `FontConfig.font_synthesis.weight` is on) it
+    /// otherwise (and when `TextFont.font_synthesis.weight` is on) it
     /// synthesizes by stroke-doubling the regular face.
     pub font_weight: Option<u16>,
     /// Italic flag. The renderer maps `true` to the entity's italic (or
     /// bold-italic) face when one is loaded; otherwise (and when
-    /// `FontConfig.font_synthesis.style` is on) it synthesizes via skew.
+    /// `TextFont.font_synthesis.style` is on) it synthesizes via skew.
     pub italic: bool,
     /// Override font for this run. When set, the renderer registers and shapes
-    /// with this handle instead of the entity's `FontConfig` slots. `None` =
+    /// with this handle instead of the entity's `TextFont` slots. `None` =
     /// use the entity default.
     pub font: Option<bevy::asset::Handle<bevy::text::Font>>,
     /// Decorations drawn alongside the text. Combine flags freely:

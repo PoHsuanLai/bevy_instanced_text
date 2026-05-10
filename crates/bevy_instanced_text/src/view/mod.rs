@@ -20,7 +20,7 @@ pub use anchor::{
     DEFAULT_BASELINE_OFFSET_RATIO,
 };
 pub use buffer_anchor::{AnchorPoint, BufferAnchorParam};
-pub use font::{FontConfig, FontSynthesis};
+pub use font::{FontSynthesis, TextFont};
 pub use layout::DisplayLayout;
 pub use layout_builder::{
     approx_display_rows_for_line, slice_runs, visible_buffer_range, wrap_into_rows,
@@ -40,6 +40,6 @@ pub use snapshot::{
 };
 pub use state::{ContentMetrics, ScrollState, TextBuffer};
 pub use styling::{BlockList, HiddenLines, LayoutWrap, LineStyles, RunWithText};
-pub use theme::{BlockDecorTheme, RenderTheme};
+pub use theme::{BlockDecorTheme, TextBackgroundColor, TextColor};
 pub use tuning::LayoutTuning;
-pub use viewport::{TextViewViewport, ViewportOrigin};
+pub use viewport::{TextViewport, ViewportOrigin};

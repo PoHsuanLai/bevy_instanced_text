@@ -1,4 +1,4 @@
-//! TextViewViewport — per-instance viewport dimensions and layout.
+//! TextViewport — per-instance viewport dimensions and layout.
 //!
 //! With the SpecializedMeshPipeline rewrite, the engine no longer cares
 //! about the viewport's *world* position — every glyph emits in entity-
@@ -18,7 +18,7 @@ use bevy::prelude::*;
 /// has its own.
 #[derive(Component, Clone, Copy, Debug, Reflect)]
 #[reflect(Component, Debug)]
-pub struct TextViewViewport {
+pub struct TextViewport {
     pub width: u32,
     pub height: u32,
     /// Screen-space hit-test position — set this even for render-to-texture views.
@@ -30,7 +30,7 @@ pub struct TextViewViewport {
     pub gutter_width: f32,
 }
 
-impl Default for TextViewViewport {
+impl Default for TextViewport {
     fn default() -> Self {
         Self {
             width: 800,
@@ -43,7 +43,7 @@ impl Default for TextViewViewport {
     }
 }
 
-impl TextViewViewport {
+impl TextViewport {
     /// World-space X of the viewport's left edge, relative to the camera
     /// origin. Centered ortho convention: `-width / 2`. Renderer +
     /// downstream sprite positioning consumers compose this with their
