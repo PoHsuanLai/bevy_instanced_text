@@ -116,8 +116,10 @@ impl PluginGroup for InstancedTextPlugins {
     }
 }
 
-// -0.010: backdate so the first rendered frame already shows motion (VSCode does the same).
-const SCROLL_BACKDATE_SECS: f32 = -0.010;
+// +0.010: pretend the animation already started 10ms ago for an instant visual response.
+// VSCode does the same: startTime = Date.now() - 10, duration = base + 10.
+const SCROLL_BACKDATE_SECS: f32 = 0.010;
+const SCROLL_BACKDATE_DURATION: f32 = 0.010;
 const COMPOSITE_SPLIT: f32 = 0.33;
 const COMPOSITE_VIEWPORT_THRESHOLD: f32 = 2.5;
 const COMPOSITE_STOP_INSET: f32 = 0.75;
@@ -171,7 +173,7 @@ fn build_animation(from: f32, to: f32, duration: f32, viewport_size: f32) -> Scr
         from,
         to,
         elapsed: SCROLL_BACKDATE_SECS,
-        duration: duration.max(0.001),
+        duration: (duration + SCROLL_BACKDATE_DURATION).max(0.001),
         composite,
     }
 }
@@ -225,6 +227,10 @@ fn animate_text_view_scroll(
         };
 
         // Determine new anim state without writing yet.
+        // Both fresh starts and mid-animation combines use `scroll_v` as `from`
+        // (the current visual position, i.e. `this._state` in VS Code terms),
+        // with the 10ms backdate. VS Code's combine() calls start() with the
+        // same signature — no special from-preservation.
         let v_anim_next = if needs_new_v {
             Some(build_animation(scroll_v, target_v, duration, viewport_h))
         } else {
