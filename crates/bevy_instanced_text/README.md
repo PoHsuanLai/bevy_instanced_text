@@ -1,5 +1,10 @@
 # bevy_instanced_text
 
+[![crates.io](https://img.shields.io/crates/v/bevy_instanced_text.svg)](https://crates.io/crates/bevy_instanced_text)
+[![docs.rs](https://docs.rs/bevy_instanced_text/badge.svg)](https://docs.rs/bevy_instanced_text)
+[![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](https://github.com/PoHsuanLai/bevscode/blob/main/LICENSE-MIT)
+[![Bevy](https://img.shields.io/badge/Bevy-0.18-blue)](https://bevyengine.org)
+
 GPU-instanced text rendering for Bevy. Spawn a `TextView`, write a `DisplayLayout`, and the plugin draws it. No input model, no UI framework coupling.
 
 ## Quick start
@@ -42,6 +47,12 @@ Position sprites or UI nodes relative to text using `DisplayLayout::pos_at_byte`
 ## Plugins
 
 `InstancedTextPlugins` bundles `GlyphAtlasPlugin` + `InstancedTextRenderPlugin` + `InstancedTextPlugin`. Add constituents individually if you need fine-grained control.
+
+## Bevy compatibility
+
+| `bevy_instanced_text` | Bevy |
+|---|---|
+| 0.1 | 0.18 |
 
 ## License
 
