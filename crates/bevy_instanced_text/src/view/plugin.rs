@@ -65,6 +65,13 @@ impl Plugin for InstancedTextPlugin {
     fn build(&self, app: &mut App) {
         app.register_type::<LayoutTuning>();
 
+        // Override LineHeight's default (1.2×) with the monospace standard (1.5×)
+        // so hosts that spawn TextView without an explicit LineHeight get the right spacing.
+        app.world_mut()
+            .register_required_components_with::<TextView, bevy::text::LineHeight>(|| {
+                bevy::text::LineHeight::RelativeToFont(1.5)
+            });
+
         app.register_type::<MonoFontFaces>()
             .register_type::<MonoCellWidth>()
             .register_type::<super::overlay::RectOverlay>()
