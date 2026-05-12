@@ -32,8 +32,12 @@ pub struct LayoutProduceSet;
 /// Per-entity dirty-detection key. Equality means "no rebuild needed".
 /// Floats are compared by bit pattern (NaN comparisons aren't a real
 /// concern — scroll/viewport never produce NaN under normal use).
+///
+/// Public so [`produce_layouts`] can be called as a Bevy system from
+/// downstream crates / tests via `RunSystemOnce` — the `Local<HashMap<..>>`
+/// parameter forces the inner type to be at least as visible as the system.
 #[derive(Clone, PartialEq, Eq)]
-pub(crate) struct LayoutFingerprint {
+pub struct LayoutFingerprint {
     content_version: u64,
     scroll_bits: u32,
     h_scroll_bits: u32,
@@ -115,7 +119,7 @@ pub fn visible_buffer_range(
 /// Reads `Option<&HiddenLines>` and `Option<&LineStyles>` for editor-domain
 /// folding / styling.
 #[allow(clippy::type_complexity)]
-pub(crate) fn produce_layouts(
+pub fn produce_layouts(
     mut q: Query<
         (
             Entity,
@@ -641,6 +645,226 @@ pub fn approx_display_rows_for_line(
         1
     } else {
         len.div_ceil(budget) as u32
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bevy::asset::Handle;
+
+    fn test_font() -> TextFont {
+        TextFont {
+            font: Handle::default(),
+            font_size: 14.0,
+            line_height: 21.0,
+            char_width: 8.0,
+            font_bold: None,
+            font_italic: None,
+            font_bold_italic: None,
+            font_synthesis: Default::default(),
+        }
+    }
+
+    fn test_viewport() -> TextViewport {
+        TextViewport {
+            width: 800,
+            height: 600,
+            hit_test_position: Vec2::ZERO,
+            text_area_left: 0.0,
+            text_area_top: 0.0,
+            gutter_width: 0.0,
+        }
+    }
+
+    fn build(buffer: &TextBuffer) -> DisplayLayout {
+        let mut metrics = ContentMetrics::default();
+        build_display_layout(
+            buffer,
+            &ScrollState::default(),
+            &mut metrics,
+            &test_viewport(),
+            &test_font(),
+            TextBounds::default(),
+            Color::WHITE,
+            None,
+            None,
+            None,
+            None,
+            VIEWPORT_BUFFER_LINES,
+        )
+    }
+
+    fn line_texts(layout: &DisplayLayout) -> Vec<String> {
+        layout.lines.iter().map(|l| l.text.clone()).collect()
+    }
+
+    /// Insert a newline in the middle of a line — the resulting layout's
+    /// rendered text must reflect both halves of the split exactly. Regression
+    /// guard for "edit produces stale glyphs on the joined/split line".
+    #[test]
+    fn newline_in_middle_splits_line_in_layout() {
+        let mut buffer = TextBuffer::new("hello world\nsecond line\nthird line\n");
+        let before = build(&buffer);
+        assert_eq!(before.lines.len(), 4, "before: rope has 4 lines (trailing \\n)");
+        let before_texts = line_texts(&before);
+        assert!(before_texts[0].starts_with("hello world"));
+        assert!(before_texts[1].starts_with("second line"));
+
+        // Mimic pressing Enter in the middle of "hello world" → "hello\n world"
+        buffer.rope.insert(5, "\n");
+        buffer.bump_version();
+
+        let after = build(&buffer);
+        let after_texts = line_texts(&after);
+        assert_eq!(after.lines.len(), 5, "after: split adds one row, total 5");
+        assert!(
+            after_texts[0].starts_with("hello"),
+            "row 0 should be 'hello', got {:?}",
+            after_texts[0]
+        );
+        assert!(
+            !after_texts[0].starts_with("hello world"),
+            "row 0 must NOT still contain the un-split text"
+        );
+        assert!(
+            after_texts[1].starts_with(" world"),
+            "row 1 should be ' world' (post-split tail), got {:?}",
+            after_texts[1]
+        );
+        assert!(
+            after_texts[2].starts_with("second line"),
+            "row 2 must be the previously-row-1 'second line', got {:?}",
+            after_texts[2]
+        );
+    }
+
+    /// Backspace at the start of a line should merge it with the previous one.
+    /// Regression guard for "old (pre-join) line lingers in the rendered batch".
+    #[test]
+    fn backspace_join_merges_lines_in_layout() {
+        let mut buffer = TextBuffer::new("hello\nworld\ntail\n");
+        let before = build(&buffer);
+        assert_eq!(before.lines.len(), 4, "rope: 'hello', 'world', 'tail', ''");
+
+        // Remove the `\n` between "hello" and "world" → "helloworld\ntail\n"
+        // Char index 5 is the '\n' after "hello".
+        let rope = &mut buffer.rope;
+        let nl_char = 5;
+        assert_eq!(rope.char(nl_char), '\n', "sanity: char at 5 is newline");
+        rope.remove(nl_char..nl_char + 1);
+        buffer.bump_version();
+
+        let after = build(&buffer);
+        let after_texts = line_texts(&after);
+        assert_eq!(after.lines.len(), 3, "join reduces line count by 1");
+        assert!(
+            after_texts[0].starts_with("helloworld"),
+            "row 0 must be the joined 'helloworld', got {:?}",
+            after_texts[0]
+        );
+        assert!(
+            after_texts[1].starts_with("tail"),
+            "row 1 must now be 'tail' (shifted up), got {:?}",
+            after_texts[1]
+        );
+        // The old "world" line must not appear anywhere.
+        assert!(
+            !after_texts.iter().any(|t| t.starts_with("world")),
+            "stale 'world' row leaked into layout: {:?}",
+            after_texts
+        );
+    }
+
+    /// Drive `produce_layouts` as a Bevy system across two ticks: tick 1
+    /// builds the initial layout, tick 2 runs after an edit. The layout the
+    /// system writes must reflect the post-edit buffer — if the fingerprint
+    /// cache wrongly says "no change", the renderer paints stale text.
+    #[test]
+    fn produce_layouts_system_rebuilds_after_content_version_bump() {
+        use crate::gpu::GlyphAtlas;
+        use bevy::asset::Assets;
+        use bevy::ecs::system::RunSystemOnce;
+        use bevy::image::Image;
+        use bevy::prelude::*;
+        use bevy::text::Font;
+
+        let mut world = World::new();
+        // produce_layouts needs both resources by signature.
+        let mut images = Assets::<Image>::default();
+        let atlas = GlyphAtlas::new(&mut images);
+        world.insert_resource(images);
+        world.insert_resource(atlas);
+        world.insert_resource(Assets::<Font>::default());
+
+        let entity = world
+            .spawn((
+                crate::view::plugin::TextView,
+                TextBuffer::new("hello world\nsecond line\nthird line\n"),
+                ScrollState::default(),
+                ContentMetrics::default(),
+                test_viewport(),
+                test_font(),
+                DisplayLayout::default(),
+                TextBounds::default(),
+                crate::view::tuning::LayoutTuning::default(),
+            ))
+            .id();
+
+        world.run_system_once(produce_layouts).unwrap();
+        let lines1 = world.get::<DisplayLayout>(entity).unwrap().lines.len();
+        assert_eq!(lines1, 4, "initial layout: 4 rows");
+
+        // Mimic the edit: insert "\n" mid-line and bump content_version.
+        {
+            let mut buf = world.get_mut::<TextBuffer>(entity).unwrap();
+            buf.rope.insert(5, "\n");
+            buf.bump_version();
+        }
+
+        world.run_system_once(produce_layouts).unwrap();
+        let layout2 = world.get::<DisplayLayout>(entity).unwrap();
+        assert_eq!(
+            layout2.lines.len(),
+            5,
+            "post-edit layout: 5 rows (split added one)"
+        );
+        let texts: Vec<&str> = layout2.lines.iter().map(|l| l.text.as_str()).collect();
+        assert!(texts[0].starts_with("hello"), "row 0 = 'hello', got {:?}", texts[0]);
+        assert!(texts[1].starts_with(" world"), "row 1 = ' world', got {:?}", texts[1]);
+    }
+
+    /// `buffer_row` on each `ShapedLine` must reflect the post-edit buffer,
+    /// not the pre-edit one. If the renderer paints at `buffer_row` * line_height,
+    /// a stale `buffer_row` is exactly what produces the "doesn't move" symptom.
+    #[test]
+    fn buffer_rows_reindex_after_line_removal() {
+        let mut buffer = TextBuffer::new("a\nb\nc\nd\ne\n");
+        let before = build(&buffer);
+        let before_rows: Vec<u32> = before.lines.iter().map(|l| l.buffer_row).collect();
+        assert_eq!(before_rows, vec![0, 1, 2, 3, 4, 5]);
+
+        // Delete line "c" entirely (chars 4..6 = "c\n").
+        buffer.rope.remove(4..6);
+        buffer.bump_version();
+
+        let after = build(&buffer);
+        let after_rows: Vec<u32> = after.lines.iter().map(|l| l.buffer_row).collect();
+        let after_texts = line_texts(&after);
+        assert_eq!(
+            after.lines.len(),
+            5,
+            "rope after deletion: 'a','b','d','e','' (5 lines), got texts={:?}",
+            after_texts
+        );
+        assert_eq!(
+            after_rows,
+            vec![0, 1, 2, 3, 4],
+            "buffer_rows must be contiguous 0..N after deletion, got {:?} texts={:?}",
+            after_rows,
+            after_texts
+        );
+        assert!(after_texts[2].starts_with('d'), "row 2 should be 'd' now");
     }
 }
 

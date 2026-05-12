@@ -292,7 +292,7 @@ fn animate_text_view_scroll(
 }
 
 #[allow(clippy::type_complexity)]
-pub(crate) fn update_text_views(
+pub fn update_text_views(
     mut commands: Commands,
     mut text_views: Query<
         (
@@ -435,7 +435,7 @@ pub(crate) fn update_text_views(
 /// Runs in `PostUpdate` after `UiSystems::Layout` so `ComputedNode` is fully
 /// resolved. Hosts set `Node` size and padding; this system propagates those
 /// values into the internal `TextViewport` cache that the rest of the engine reads.
-pub(crate) fn sync_viewport_from_node(
+pub fn sync_viewport_from_node(
     mut q: Query<(&ComputedNode, &UiGlobalTransform, &mut TextViewport), With<TextView>>,
 ) {
     for (computed, ui_transform, mut viewport) in q.iter_mut() {
@@ -443,10 +443,6 @@ pub(crate) fn sync_viewport_from_node(
         // (world units) by multiplying by inverse_scale_factor (= 1/dpi_scale).
         let inv_scale = computed.inverse_scale_factor();
         let size = computed.size() * inv_scale;
-        // content_inset() returns BorderRect in physical pixels; convert to logical.
-        let inset_phys = computed.content_inset();
-        let inset_left = inset_phys.min_inset.x * inv_scale;
-        let inset_top = inset_phys.min_inset.y * inv_scale;
         // UiGlobalTransform.translation is the node's CENTER in physical pixels.
         // Subtract half-size to get the top-left, then convert to logical pixels.
         let center_phys = ui_transform.translation;
@@ -455,20 +451,17 @@ pub(crate) fn sync_viewport_from_node(
         let top_left = top_left_phys * inv_scale;
         let new_width = size.x as u32;
         let new_height = size.y as u32;
-        let new_left = inset_left;
-        let new_top = inset_top;
         let new_hit = top_left;
-        // Only write (triggering change detection) when something actually changed.
+        // Owns width/height/hit_test_position only. `text_area_left`/`text_area_top`
+        // / `gutter_width` are host-owned (e.g. bevscode's `sync_gutter_width`) —
+        // overwriting them here causes a per-frame write loop that fires
+        // `Changed<TextViewport>` indefinitely.
         if viewport.width != new_width
             || viewport.height != new_height
-            || viewport.text_area_left != new_left
-            || viewport.text_area_top != new_top
             || viewport.hit_test_position != new_hit
         {
             viewport.width = new_width;
             viewport.height = new_height;
-            viewport.text_area_left = new_left;
-            viewport.text_area_top = new_top;
             viewport.hit_test_position = new_hit;
         }
     }
