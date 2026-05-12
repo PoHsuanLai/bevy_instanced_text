@@ -429,26 +429,34 @@ pub fn update_text_views(
     }
 }
 
-/// Sync `TextViewport` width/height from Bevy UI layout each frame.
+/// Sync `TextViewport` from Bevy UI layout each frame.
 ///
 /// Runs in `PostUpdate` after `UiSystems::Layout` so `ComputedNode` is fully
-/// resolved. Hit-testing is now handled by Bevy UI's picking backend directly
-/// via `ComputedNode::contains_point` — no screen-space origin needed here.
+/// resolved. Derives width/height from node size and text_area_left/top from
+/// `content_inset` (i.e. resolved `Node::padding`). Hit-testing is handled by
+/// Bevy UI's picking backend — no screen-space origin needed.
 pub fn sync_viewport_from_node(
     mut q: Query<(&ComputedNode, &mut TextViewport), With<TextView>>,
 ) {
     for (computed, mut viewport) in q.iter_mut() {
-        // ComputedNode values are in physical pixels. Convert to logical pixels
-        // (world units) by multiplying by inverse_scale_factor (= 1/dpi_scale).
+        // ComputedNode values are in physical pixels; convert to logical via inverse_scale_factor.
         let inv_scale = computed.inverse_scale_factor();
         let size = computed.size() * inv_scale;
+        let inset = computed.content_inset();
         let new_width = size.x as u32;
         let new_height = size.y as u32;
+        let new_left = inset.min_inset.x * inv_scale;
+        let new_top = inset.min_inset.y * inv_scale;
         // Only write when changed — avoids spurious Changed<TextViewport> every frame.
-        // Host owns gutter/margin fields; touching them here would fire Changed indefinitely.
-        if viewport.width != new_width || viewport.height != new_height {
+        if viewport.width != new_width
+            || viewport.height != new_height
+            || (viewport.text_area_left - new_left).abs() > 0.01
+            || (viewport.text_area_top - new_top).abs() > 0.01
+        {
             viewport.width = new_width;
             viewport.height = new_height;
+            viewport.text_area_left = new_left;
+            viewport.text_area_top = new_top;
         }
     }
 }
