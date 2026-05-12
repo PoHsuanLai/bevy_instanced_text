@@ -1,22 +1,12 @@
-//! Per-entity font configuration. The renderer reads this; there is no global
-//! font resource.
+//! Font configuration components for `TextView` entities.
+//!
+//! Uses `bevy::text::TextFont` for font handle + size, `bevy::text::LineHeight`
+//! for row height (same as Bevy's text pipeline). One companion component carries
+//! monospace-specific extensions:
+//! - [`MonoFontFaces`] — bold/italic face handles and synthesis settings.
+//! - [`MonoCellWidth`] — character advance width (no Bevy equivalent).
 
 use bevy::prelude::*;
-use bevy::text::Font;
-
-/// Per-entity font configuration: face handles, size, line height, and synthesis settings.
-#[derive(Component, Clone, Debug, Reflect)]
-#[reflect(Component, Default, Debug)]
-pub struct TextFont {
-    pub font: Handle<Font>,
-    pub font_size: f32,
-    pub line_height: f32,
-    pub char_width: f32,
-    pub font_bold: Option<Handle<Font>>,
-    pub font_italic: Option<Handle<Font>>,
-    pub font_bold_italic: Option<Handle<Font>>,
-    pub font_synthesis: FontSynthesis,
-}
 
 /// Faux bold/italic synthesis settings for when a dedicated font face isn't provided.
 ///
@@ -42,78 +32,77 @@ impl Default for FontSynthesis {
     }
 }
 
-impl Default for TextFont {
+/// Bold and italic face handles for a monospace font family, plus synthesis
+/// fallback settings.
+///
+/// Works the same way as Bevy's per-`TextSpan` font swapping: load each face
+/// as a separate asset and assign the handle here. The renderer picks the
+/// appropriate face per `StyleRun` based on `font_weight` / `italic` flags,
+/// falling back toward `TextFont::font` (the regular face) when a slot is
+/// empty. When a face is missing and the corresponding synthesis flag is set,
+/// the renderer approximates it (double-draw for bold, shear for italic).
+#[derive(Component, Clone, Debug, Default, Reflect)]
+#[reflect(Component, Default, Debug)]
+pub struct MonoFontFaces {
+    pub font_bold: Option<Handle<Font>>,
+    pub font_italic: Option<Handle<Font>>,
+    pub font_bold_italic: Option<Handle<Font>>,
+    pub font_synthesis: FontSynthesis,
+}
+
+impl MonoFontFaces {
+    pub fn with_bold(mut self, handle: Handle<Font>) -> Self {
+        self.font_bold = Some(handle);
+        self
+    }
+
+    pub fn with_italic(mut self, handle: Handle<Font>) -> Self {
+        self.font_italic = Some(handle);
+        self
+    }
+
+    pub fn with_bold_italic(mut self, handle: Handle<Font>) -> Self {
+        self.font_bold_italic = Some(handle);
+        self
+    }
+}
+
+/// Advance width of one monospace cell in logical pixels.
+///
+/// Bevy's text pipeline measures per-glyph advance from font metrics at shape
+/// time and has no equivalent concept. For instanced monospace rendering we need
+/// this up-front for viewport culling, cursor placement, and wrap budgets.
+///
+/// Default approximates a 14 px font (`font_size * 0.6`). The editor's
+/// `update_font_metrics` system measures the actual advance of `'0'` from the
+/// atlas and writes it back here each frame.
+///
+/// Line height uses Bevy's standard `LineHeight` component (same semantics as
+/// Bevy's text pipeline — hosts set `LineHeight::Px` or `LineHeight::RelativeToFont`).
+#[derive(Component, Clone, Copy, Debug, Reflect)]
+#[reflect(Component, Default, Debug)]
+pub struct MonoCellWidth {
+    pub px: f32,
+}
+
+impl MonoCellWidth {
+    pub fn from_font_size(font_size: f32) -> Self {
+        Self { px: font_size * 0.6 }
+    }
+}
+
+impl Default for MonoCellWidth {
     fn default() -> Self {
         Self::from_font_size(14.0)
     }
 }
 
-impl TextFont {
-    pub fn from_font_size(font_size: f32) -> Self {
-        Self {
-            font: Handle::default(),
-            font_size,
-            line_height: font_size * 1.5,
-            char_width: font_size * 0.6,
-            font_bold: None,
-            font_italic: None,
-            font_bold_italic: None,
-            font_synthesis: FontSynthesis::default(),
-        }
-    }
-
-    pub fn with_line_height(mut self, line_height: f32) -> Self {
-        self.line_height = line_height;
-        self
-    }
-
-    pub fn with_line_height_multiplier(mut self, multiplier: f32) -> Self {
-        self.line_height = self.font_size * multiplier;
-        self
-    }
-
-    pub fn with_char_width(mut self, char_width: f32) -> Self {
-        self.char_width = char_width;
-        self
-    }
-
-    pub fn with_font(mut self, handle: Handle<Font>) -> Self {
-        self.font = handle;
-        self
-    }
-
-    pub fn with_bold_font(mut self, handle: Handle<Font>) -> Self {
-        self.font_bold = Some(handle);
-        self
-    }
-
-    pub fn with_italic_font(mut self, handle: Handle<Font>) -> Self {
-        self.font_italic = Some(handle);
-        self
-    }
-
-    pub fn with_bold_italic_font(mut self, handle: Handle<Font>) -> Self {
-        self.font_bold_italic = Some(handle);
-        self
-    }
-
-    pub fn with_font_synthesis(mut self, synthesis: FontSynthesis) -> Self {
-        self.font_synthesis = synthesis;
-        self
-    }
-
-    /// Returns the best available face handle for `(bold, italic)`, falling back toward regular.
-    pub fn font_for(&self, bold: bool, italic: bool) -> &Handle<Font> {
-        match (bold, italic) {
-            (true, true) => self
-                .font_bold_italic
-                .as_ref()
-                .or(self.font_bold.as_ref())
-                .or(self.font_italic.as_ref())
-                .unwrap_or(&self.font),
-            (true, false) => self.font_bold.as_ref().unwrap_or(&self.font),
-            (false, true) => self.font_italic.as_ref().unwrap_or(&self.font),
-            (false, false) => &self.font,
-        }
+/// Convenience: resolve `LineHeight` to pixels given a `font_size`.
+/// Mirrors `bevy::text::LineHeight` semantics without touching the private `eval` method.
+#[inline]
+pub fn resolve_line_height(line_height: bevy::text::LineHeight, font_size: f32) -> f32 {
+    match line_height {
+        bevy::text::LineHeight::Px(px) => px,
+        bevy::text::LineHeight::RelativeToFont(scale) => scale * font_size,
     }
 }

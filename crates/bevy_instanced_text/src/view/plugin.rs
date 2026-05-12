@@ -11,7 +11,7 @@ use bevy::app::{PluginGroup, PluginGroupBuilder};
 use bevy::prelude::*;
 use bevy::ui::{ComputedNode, IsDefaultUiCamera, UiSystems};
 
-use super::font::TextFont;
+use super::font::{MonoCellWidth, MonoFontFaces};
 use super::layout::DisplayLayout;
 use super::layout_builder::{produce_layouts, LayoutProduceSet};
 use super::overlay::TextViewOverlays;
@@ -39,6 +39,9 @@ pub struct TextViewRenderSet;
     DisplayLayout,
     TextViewOverlays,
     TextFont,
+    MonoFontFaces,
+    MonoCellWidth,
+    bevy::text::LineHeight,
     TextBounds,
     LayoutTuning,
     Node,
@@ -62,7 +65,8 @@ impl Plugin for InstancedTextPlugin {
     fn build(&self, app: &mut App) {
         app.register_type::<LayoutTuning>();
 
-        app.register_type::<TextFont>()
+        app.register_type::<MonoFontFaces>()
+            .register_type::<MonoCellWidth>()
             .register_type::<super::overlay::RectOverlay>()
             .register_type::<super::overlay::RowVertical>()
             .register_type::<TextBounds>()
@@ -298,6 +302,7 @@ pub fn update_text_views(
             &ScrollState,
             &ComputedNode,
             &TextFont,
+            &MonoFontFaces,
             Ref<DisplayLayout>,
             Option<Ref<TextViewOverlays>>,
             Option<&TextViewBatchEntity>,
@@ -310,19 +315,19 @@ pub fn update_text_views(
     fonts: Res<Assets<bevy::text::Font>>,
 ) {
     let _span = bevy::prelude::info_span!("update_text_views").entered();
-    for (tv_entity, scroll, computed, font, layout, overlays, batch_entity_opt, render_layers) in
+    for (tv_entity, scroll, computed, font, faces_cfg, layout, overlays, batch_entity_opt, render_layers) in
         text_views.iter_mut()
     {
         let regular = atlas.ensure_font(&font.font, &fonts);
-        let bold = font
+        let bold = faces_cfg
             .font_bold
             .as_ref()
             .and_then(|h| atlas.ensure_font(h, &fonts));
-        let italic = font
+        let italic = faces_cfg
             .font_italic
             .as_ref()
             .and_then(|h| atlas.ensure_font(h, &fonts));
-        let bold_italic = font
+        let bold_italic = faces_cfg
             .font_bold_italic
             .as_ref()
             .and_then(|h| atlas.ensure_font(h, &fonts));
@@ -331,7 +336,7 @@ pub fn update_text_views(
             bold,
             italic,
             bold_italic,
-            synthesis: font.font_synthesis,
+            synthesis: faces_cfg.font_synthesis,
         };
         // Skip the rebuild if neither layout nor overlays changed — the GPU batch is still valid.
         let overlays_changed = overlays.as_ref().map(|o| o.is_changed()).unwrap_or(false);

@@ -12,7 +12,7 @@ use bevy::prelude::*;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use super::font::TextFont;
+use super::font::MonoCellWidth;
 use super::layout::DisplayLayout;
 use super::plugin::TextView;
 use super::snapshot::{LineShape, ShapedGlyph, ShapedLine, StyleRun};
@@ -65,12 +65,11 @@ pub fn visible_buffer_range(
     scroll: &ScrollState,
     viewport_height: f32,
     text_area_top: f32,
-    font: &TextFont,
+    line_height: f32,
+    char_width: f32,
     wrap: TextBounds,
     hidden: Option<&HiddenLines>,
 ) -> std::ops::Range<usize> {
-    let line_height = font.line_height;
-    let char_width = font.char_width;
     let total = buffer.line_count();
     if total == 0 {
         return 0..0;
@@ -129,6 +128,8 @@ pub fn produce_layouts(
             &mut ContentMetrics,
             &ComputedNode,
             &TextFont,
+            &bevy::text::LineHeight,
+            &MonoCellWidth,
             &mut DisplayLayout,
             Option<&HiddenLines>,
             Option<&LineStyles>,
@@ -150,6 +151,8 @@ pub fn produce_layouts(
         mut metrics,
         tv_viewport,
         font,
+        lh,
+        mono,
         mut layout,
         hidden,
         styles,
@@ -162,6 +165,7 @@ pub fn produce_layouts(
             .unwrap_or(VIEWPORT_BUFFER_LINES);
         alive.insert(entity);
         let wrap = wrap.copied().unwrap_or_default();
+        let line_height = crate::view::font::resolve_line_height(*lh, font.font_size);
 
         // Identity-keyed change detection: a producer that writes a fresh
         // Arc each refresh changes the address; the engine refingerprints.
@@ -181,7 +185,7 @@ pub fn produce_layouts(
             viewport_h: logical.y as u32,
             viewport_top_bits: text_area_top.to_bits(),
             font_size_tenths: (font.font_size * 10.0) as u32,
-            line_height_tenths: (font.line_height * 10.0) as u32,
+            line_height_tenths: (line_height * 10.0) as u32,
             style_arc_addr,
             hidden_arc_addr,
             wrap_budget_bits: wrap
@@ -205,6 +209,8 @@ pub fn produce_layouts(
                     &mut metrics,
                     tv_viewport,
                     font,
+                    line_height,
+                    mono,
                     wrap,
                     layout.default_fg,
                     hidden,
@@ -260,6 +266,8 @@ pub(crate) fn build_display_layout(
     metrics: &mut ContentMetrics,
     viewport: &ComputedNode,
     font: &TextFont,
+    line_height: f32,
+    mono: &MonoCellWidth,
     wrap: TextBounds,
     default_fg: Color,
     hidden: Option<&HiddenLines>,
@@ -272,8 +280,7 @@ pub(crate) fn build_display_layout(
         width: wrap_width,
         indent_px: wrap_indent_px,
     } = wrap;
-    let line_height = font.line_height;
-    let char_width = font.char_width;
+    let char_width = mono.px;
     let baseline_offset = font.font_size * 0.32;
     let total_buffer_lines = buffer.line_count();
 
@@ -661,16 +668,15 @@ mod tests {
     use bevy::asset::Handle;
 
     fn test_font() -> TextFont {
-        TextFont {
-            font: Handle::default(),
-            font_size: 14.0,
-            line_height: 21.0,
-            char_width: 8.0,
-            font_bold: None,
-            font_italic: None,
-            font_bold_italic: None,
-            font_synthesis: Default::default(),
-        }
+        TextFont::from_font_size(14.0)
+    }
+
+    fn test_mono() -> MonoCellWidth {
+        MonoCellWidth { px: 8.0 }
+    }
+
+    fn test_line_height() -> f32 {
+        21.0
     }
 
     fn test_computed() -> ComputedNode {
@@ -688,6 +694,8 @@ mod tests {
             &mut metrics,
             &test_computed(),
             &test_font(),
+            test_line_height(),
+            &test_mono(),
             TextBounds::default(),
             Color::WHITE,
             None,

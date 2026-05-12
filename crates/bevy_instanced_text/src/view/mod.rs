@@ -19,7 +19,7 @@ pub use anchor::{
     DEFAULT_BASELINE_OFFSET_RATIO,
 };
 pub use buffer_anchor::{AnchorPoint, BufferAnchorParam};
-pub use font::{FontSynthesis, TextFont};
+pub use font::{FontSynthesis, MonoCellWidth, MonoFontFaces, resolve_line_height};
 pub use layout::DisplayLayout;
 pub use layout_builder::{
     approx_display_rows_for_line, slice_runs, visible_buffer_range, wrap_into_rows,

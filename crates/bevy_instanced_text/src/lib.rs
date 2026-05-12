@@ -113,8 +113,8 @@ pub mod prelude {
     pub use crate::view::{
         row_metrics, row_metrics_with_baseline, AnchorPoint, BufferAnchorParam, ContentMetrics,
         CornerRadii, DisplayLayout, FontSynthesis, HiddenLines, InstancedTextPlugin,
-        InstancedTextPlugins, LineStyles, RectOverlay, RowMetrics, RowMetricsParam, RowVertical,
-        RunWithText, ScrollState, StyleRun, TextBackgroundColor, TextBounds, TextBuffer, TextColor,
-        TextFont, TextView, TextViewOverlays,
+        InstancedTextPlugins, LineStyles, MonoCellWidth, MonoFontFaces, RectOverlay, RowMetrics,
+        RowMetricsParam, RowVertical, RunWithText, ScrollState, StyleRun, TextBackgroundColor,
+        TextBounds, TextBuffer, TextColor, TextView, TextViewOverlays,
     };
 }
