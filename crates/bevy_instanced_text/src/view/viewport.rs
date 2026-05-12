@@ -1,32 +1,27 @@
-//! TextViewport — per-instance viewport dimensions and layout.
+//! `TextViewport` — internal cache of resolved viewport dimensions.
 //!
-//! With the SpecializedMeshPipeline rewrite, the engine no longer cares
-//! about the viewport's *world* position — every glyph emits in entity-
-//! local pixel space and the entity's `Transform` does the world placement.
-//! This component now carries only the rect-bound state the layout pass
-//! needs: the visible width/height, hit-test position, content margins,
-//! gutter width.
-//!
-//! `world_left` / `world_top` survive as deprecated zero-returning
-//! shims so external consumers that compose viewport offsets with their
-//! own coordinates keep building. Callers should migrate to using the
-//! `TextView` entity's `Transform` / `GlobalTransform` instead.
+//! Populated every frame by `sync_viewport_from_node` from `ComputedNode`
+//! and `UiGlobalTransform`. Internal code reads this; hosts set `Node`
+//! padding/size and never touch `TextViewport` directly.
 
 use bevy::prelude::*;
 
-/// Per-entity viewport dimensions. Component (not Resource) so each text view
-/// has its own.
+/// Internal per-entity viewport cache. Written by `sync_viewport_from_node`
+/// from Bevy UI layout; read by layout, rendering, and anchor systems.
+/// Hosts should not set this manually — set `Node` size and padding instead.
 #[derive(Component, Clone, Copy, Debug, Reflect)]
 #[reflect(Component, Debug)]
 pub struct TextViewport {
     pub width: u32,
     pub height: u32,
-    /// Screen-space hit-test position — set this even for render-to-texture views.
+    /// Screen-space top-left of the node, derived from `UiGlobalTransform`.
     pub hit_test_position: bevy::math::Vec2,
+    /// Resolved from `Node::padding.left` via `ComputedNode::content_inset`.
     pub text_area_left: f32,
+    /// Resolved from `Node::padding.top` via `ComputedNode::content_inset`.
     pub text_area_top: f32,
-    /// 0 for views without a gutter. Editor IDE chrome (the line numbers
-    /// gutter) draws its separator at this x; non-editor views ignore it.
+    /// Kept for internal gutter-width tracking; populated by `bevscode`
+    /// via `sync_viewport_from_node` override or direct insert.
     pub gutter_width: f32,
 }
 
@@ -44,27 +39,12 @@ impl Default for TextViewport {
 }
 
 impl TextViewport {
-    /// World-space X of the viewport's left edge, relative to the camera
-    /// origin. Centered ortho convention: `-width / 2`. Renderer +
-    /// downstream sprite positioning consumers compose this with their
-    /// content's local x offset.
     pub fn world_left(&self) -> f32 {
         -(self.width as f32) / 2.0
     }
 
-    /// World-space Y of the viewport's top edge, relative to the camera
-    /// origin. Centered ortho convention: `+height / 2`.
     pub fn world_top(&self) -> f32 {
         self.height as f32 / 2.0
     }
 }
 
-/// Deprecated stub kept so consumers re-exporting `bevy_instanced_text::ViewportOrigin`
-/// keep building. The engine no longer reads it. Will be removed in a follow-up.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Reflect)]
-#[reflect(Default, PartialEq)]
-pub enum ViewportOrigin {
-    #[default]
-    CenteredOrtho,
-    ScreenAbsolute(bevy::math::Vec2),
-}

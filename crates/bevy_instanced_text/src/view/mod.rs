@@ -26,6 +26,7 @@ pub use layout_builder::{
     approx_display_rows_for_line, slice_runs, visible_buffer_range, wrap_into_rows,
     LayoutProduceSet, WrapRow,
 };
+
 pub use overlay::{
     for_each_row_in_buffer_span, CornerRadii, RectOverlay, RowPosition, RowVertical,
     TextViewOverlays,
@@ -34,12 +35,9 @@ pub use plugin::{
     InstancedTextPlugin, InstancedTextPlugins, TextView, TextViewBatchEntity, TextViewRenderSet,
 };
 pub use render::{render_layout, FontFaces, GlyphBatchComponent, GlyphInstance, TextViewBatch};
-pub use snapshot::{
-    trivial_layout, Block, BlockBorder, BlockDecoration, BlockLayoutConfig, BlockRect, ShapedLine,
-    StyleRun, TextDecoration,
-};
+pub use snapshot::{ShapedLine, StyleRun, TextDecoration};
 pub use state::{ContentMetrics, ScrollState, TextBuffer};
-pub use styling::{BlockList, HiddenLines, LayoutWrap, LineStyles, RunWithText};
-pub use theme::{BlockDecorTheme, TextBackgroundColor, TextColor};
+pub use styling::{HiddenLines, LineStyles, RunWithText, TextBounds};
+pub use theme::{TextBackgroundColor, TextColor};
 pub use tuning::LayoutTuning;
-pub use viewport::{TextViewport, ViewportOrigin};
+pub use viewport::TextViewport;

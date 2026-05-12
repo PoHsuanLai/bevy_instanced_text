@@ -9,15 +9,17 @@
 
 use bevy::app::{PluginGroup, PluginGroupBuilder};
 use bevy::prelude::*;
+use bevy::ui::{ComputedNode, IsDefaultUiCamera, UiSystems};
+use bevy::ui::ui_transform::UiGlobalTransform;
 
 use super::font::TextFont;
 use super::layout::DisplayLayout;
-use super::layout_builder::{produce_block_layout, produce_layouts, LayoutProduceSet};
+use super::layout_builder::{produce_layouts, LayoutProduceSet};
 use super::overlay::TextViewOverlays;
 use super::render::{render_layout, GlyphBatchComponent, TextViewBatch};
 use super::state::{CompositeStops, ContentMetrics, ScrollAnimation, ScrollState, TextBuffer};
-use super::styling::LayoutWrap;
-use super::theme::{BlockDecorTheme, TextBackgroundColor, TextColor};
+use super::styling::TextBounds;
+use super::theme::{TextBackgroundColor, TextColor};
 use super::tuning::LayoutTuning;
 use super::viewport::TextViewport;
 use crate::gpu::{atlas_ready, GlyphAtlas, GlyphAtlasPlugin, InstancedTextRenderPlugin};
@@ -40,8 +42,9 @@ pub struct TextViewRenderSet;
     DisplayLayout,
     TextViewOverlays,
     TextFont,
-    LayoutWrap,
+    TextBounds,
     LayoutTuning,
+    Node,
     Transform,
     Visibility,
     bevy::picking::Pickable
@@ -65,31 +68,33 @@ impl Plugin for InstancedTextPlugin {
         app.register_type::<TextFont>()
             .register_type::<super::overlay::RectOverlay>()
             .register_type::<super::overlay::RowVertical>()
-            .register_type::<LayoutWrap>()
+            .register_type::<TextBounds>()
             .register_type::<TextColor>()
             .register_type::<TextBackgroundColor>()
-            .register_type::<BlockDecorTheme>()
             .register_type::<TextView>()
             .register_type::<TextViewBatchEntity>()
             .register_type::<TextViewOverlays>()
             .register_type::<TextBuffer>()
             .register_type::<ScrollState>()
             .register_type::<ContentMetrics>()
-            .register_type::<TextViewport>()
-            .register_type::<super::viewport::ViewportOrigin>();
+            .register_type::<TextViewport>();
+
+        app.add_systems(Update, animate_text_view_scroll);
+
+        // Ensure there is always a camera marked as the default UI camera so
+        // Bevy UI layout can resolve Val::Percent sizes for TextView Node entities.
+        // Runs in PostStartup so all Startup camera-spawning systems have completed.
+        // Hosts that want a specific camera can add IsDefaultUiCamera themselves.
+        app.add_systems(PostStartup, ensure_default_ui_camera);
 
         app.add_systems(
-            Update,
+            PostUpdate,
             (
-                animate_text_view_scroll,
+                sync_viewport_from_node.after(UiSystems::Layout),
                 produce_layouts
                     .run_if(atlas_ready)
                     .in_set(LayoutProduceSet)
-                    .before(prewarm_atlas_for_layout),
-                // Mutually exclusive with `produce_layouts` at the entity level —
-                // `produce_layouts` filters out entities that have `BlockList`.
-                produce_block_layout
-                    .in_set(LayoutProduceSet)
+                    .after(sync_viewport_from_node)
                     .before(prewarm_atlas_for_layout),
                 prewarm_atlas_for_layout
                     .run_if(atlas_ready)
@@ -97,8 +102,7 @@ impl Plugin for InstancedTextPlugin {
                 update_text_views
                     .run_if(atlas_ready)
                     .in_set(TextViewRenderSet),
-            )
-                .chain(),
+            ),
         );
     }
 }
@@ -423,6 +427,66 @@ pub(crate) fn update_text_views(
                 .entity(tv_entity)
                 .insert(TextViewBatchEntity(batch_entity));
         }
+    }
+}
+
+/// Sync `TextViewport` from Bevy UI layout each frame.
+///
+/// Runs in `PostUpdate` after `UiSystems::Layout` so `ComputedNode` is fully
+/// resolved. Hosts set `Node` size and padding; this system propagates those
+/// values into the internal `TextViewport` cache that the rest of the engine reads.
+pub(crate) fn sync_viewport_from_node(
+    mut q: Query<(&ComputedNode, &UiGlobalTransform, &mut TextViewport), With<TextView>>,
+) {
+    for (computed, ui_transform, mut viewport) in q.iter_mut() {
+        // ComputedNode values are in physical pixels. Convert to logical pixels
+        // (world units) by multiplying by inverse_scale_factor (= 1/dpi_scale).
+        let inv_scale = computed.inverse_scale_factor();
+        let size = computed.size() * inv_scale;
+        // content_inset() returns BorderRect in physical pixels; convert to logical.
+        let inset_phys = computed.content_inset();
+        let inset_left = inset_phys.min_inset.x * inv_scale;
+        let inset_top = inset_phys.min_inset.y * inv_scale;
+        // UiGlobalTransform.translation is the node's CENTER in physical pixels.
+        // Subtract half-size to get the top-left, then convert to logical pixels.
+        let center_phys = ui_transform.translation;
+        let half_size_phys = computed.size() * 0.5;
+        let top_left_phys = center_phys - half_size_phys;
+        let top_left = top_left_phys * inv_scale;
+        let new_width = size.x as u32;
+        let new_height = size.y as u32;
+        let new_left = inset_left;
+        let new_top = inset_top;
+        let new_hit = top_left;
+        // Only write (triggering change detection) when something actually changed.
+        if viewport.width != new_width
+            || viewport.height != new_height
+            || viewport.text_area_left != new_left
+            || viewport.text_area_top != new_top
+            || viewport.hit_test_position != new_hit
+        {
+            viewport.width = new_width;
+            viewport.height = new_height;
+            viewport.text_area_left = new_left;
+            viewport.text_area_top = new_top;
+            viewport.hit_test_position = new_hit;
+        }
+    }
+}
+
+/// Mark one camera as the default UI camera if none is marked yet.
+/// This lets Bevy UI resolve `Val::Percent` sizes for `TextView` `Node` entities
+/// without requiring hosts to manually add `IsDefaultUiCamera` to their camera.
+fn ensure_default_ui_camera(
+    mut commands: Commands,
+    cameras: Query<Entity, With<Camera>>,
+    already_marked: Query<(), With<IsDefaultUiCamera>>,
+) {
+    if !already_marked.is_empty() {
+        return;
+    }
+    if let Some(entity) = cameras.iter().next() {
+        commands.entity(entity).insert(IsDefaultUiCamera);
     }
 }
 

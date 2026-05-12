@@ -1,7 +1,6 @@
-//! Plain-data Components that plug into `produce_layouts`
-//! and `produce_block_layout`.
+//! Plain-data Components that plug into `produce_layouts`.
 //!
-//! The engine's layout systems query each `TextView` entity for these
+//! The engine's layout system queries each `TextView` entity for these
 //! components. They're optional: an entity without [`HiddenLines`] shows every
 //! line; one without [`LineStyles`] renders with `DisplayLayout::default_fg`.
 
@@ -10,7 +9,7 @@ use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 use std::sync::Arc;
 
-use super::snapshot::{Block, StyleRun};
+use super::snapshot::StyleRun;
 
 /// Optional Component on a `TextView` entity selecting which buffer lines
 /// the engine renders. Absent ⇒ every line is visible.
@@ -63,41 +62,24 @@ impl LineStyles {
     }
 }
 
-/// Optional Component on a `TextView` entity that drives the static-content
-/// path. When present, `produce_block_layout` reads
-/// the blocks each frame (gated by `Changed<BlockList>`) and writes the
-/// entity's `DisplayLayout`. Mutually exclusive with the rope-driven
-/// [`LineStyles`] flow — an entity uses one or the other.
+/// Soft-wrap configuration Component. Mirrors Bevy's `TextBounds` name.
 ///
-/// `Arc<Vec<Block>>` so updates can swap the whole list without copying;
-/// cloning is cheap (refcount bump).
-#[derive(Component, Default, Clone)]
-pub struct BlockList(pub Arc<Vec<Block>>);
-
-impl BlockList {
-    pub fn new(blocks: Vec<Block>) -> Self {
-        Self(Arc::new(blocks))
-    }
-}
-
-/// Soft-wrap configuration Component.
-///
-/// `budget_px = None` disables wrap (one display row per visible buffer
-/// line). When set, lines wider than `budget_px` split into multiple
-/// continuation rows, each inset by `indent_px`.
+/// `width = None` disables wrap (one display row per visible buffer line).
+/// When set, lines wider than `width` split into multiple continuation rows,
+/// each inset by `indent_px`.
 #[derive(Component, Clone, Copy, Debug, Reflect)]
 #[reflect(Component, Default)]
-pub struct LayoutWrap {
+pub struct TextBounds {
     /// Pixel width budget for a row. `None` ⇒ no wrap.
-    pub budget_px: Option<f32>,
+    pub width: Option<f32>,
     /// Continuation-row left inset in pixels.
     pub indent_px: f32,
 }
 
-impl Default for LayoutWrap {
+impl Default for TextBounds {
     fn default() -> Self {
         Self {
-            budget_px: None,
+            width: None,
             indent_px: 0.0,
         }
     }

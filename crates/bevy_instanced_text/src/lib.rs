@@ -16,7 +16,7 @@
 //! - **[`LineStyles`]** — per-line [`StyleRun`] lists (colors, bold, italic,
 //!   inline backgrounds). Producers write this; the engine reads it.
 //! - **[`HiddenLines`]** — which buffer lines to skip (e.g. folded regions).
-//! - **[`LayoutWrap`]** — optional soft-wrap budget in pixels.
+//! - **[`TextBounds`]** — optional soft-wrap budget in pixels.
 //! - **[`TextViewOverlays`]** — decoration rectangles (cursors, selections,
 //!   highlights) written by the host each frame.
 //!
@@ -58,11 +58,10 @@ pub mod prelude {
     //! Common types for spawning and rendering text views.
     pub use crate::gpu::{GlyphAtlasPlugin, InstancedTextRenderPlugin};
     pub use crate::view::{
-        row_metrics, row_metrics_with_baseline, AnchorPoint, Block, BlockDecorTheme,
-        BlockLayoutConfig, BlockList, BufferAnchorParam, ContentMetrics, CornerRadii,
-        DisplayLayout, FontSynthesis, HiddenLines, InstancedTextPlugin, InstancedTextPlugins,
-        LayoutWrap, LineStyles, RectOverlay, RowMetrics, RowMetricsParam, RowVertical, RunWithText,
-        ScrollState, StyleRun, TextBackgroundColor, TextBuffer, TextColor, TextFont, TextView,
-        TextViewOverlays, TextViewport,
+        row_metrics, row_metrics_with_baseline, AnchorPoint, BufferAnchorParam, ContentMetrics,
+        CornerRadii, DisplayLayout, FontSynthesis, HiddenLines, InstancedTextPlugin,
+        InstancedTextPlugins, LineStyles, RectOverlay, RowMetrics, RowMetricsParam, RowVertical,
+        RunWithText, ScrollState, StyleRun, TextBackgroundColor, TextBounds, TextBuffer, TextColor,
+        TextFont, TextView, TextViewOverlays, TextViewport,
     };
 }

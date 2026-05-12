@@ -2,16 +2,11 @@
 //!
 //! `produce_layouts` is the engine's per-frame layout system. It walks
 //! every `TextView` entity, reads its (optional) [`HiddenLines`] /
-//! [`LineStyles`] / [`LayoutWrap`] data Components, shapes the visible
+//! [`LineStyles`] / [`TextBounds`] data Components, shapes the visible
 //! window through cosmic-text, and (when soft wrap is enabled) splits long
 //! lines on a pixel-budget boundary into multiple `ShapedLine` rows. The
 //! result is the per-frame `DisplayLayout` consumed by the renderer and by
 //! cursor / selection / overlay producers.
-//!
-//! These data Components plug editor-domain concepts (folds, syntax) into
-//! the engine without making the engine depend on them. Markdown / chat /
-//! log-viewer consumers can write the same Components from their own
-//! producer systems.
 
 use bevy::prelude::*;
 use std::collections::HashMap;
@@ -20,9 +15,9 @@ use std::sync::Arc;
 use super::font::TextFont;
 use super::layout::DisplayLayout;
 use super::plugin::TextView;
-use super::snapshot::{Block, BlockLayoutConfig, LineShape, ShapedGlyph, ShapedLine, StyleRun};
+use super::snapshot::{LineShape, ShapedGlyph, ShapedLine, StyleRun};
 use super::state::{ContentMetrics, ScrollState, TextBuffer};
-use super::styling::{BlockList, HiddenLines, LayoutWrap, LineStyles, RunWithText};
+use super::styling::{HiddenLines, LineStyles, RunWithText, TextBounds};
 use super::viewport::TextViewport;
 use crate::gpu::GlyphAtlas;
 
@@ -66,7 +61,7 @@ pub fn visible_buffer_range(
     scroll: &ScrollState,
     viewport: &TextViewport,
     font: &TextFont,
-    wrap: LayoutWrap,
+    wrap: TextBounds,
     hidden: Option<&HiddenLines>,
 ) -> std::ops::Range<usize> {
     let line_height = font.line_height;
@@ -83,7 +78,7 @@ pub fn visible_buffer_range(
     let visible_count = ((viewport.height as f32 + buf_px * 2.0) / line_height).ceil() as u32;
     let last_visible_display_row = first_visible_display_row + visible_count;
 
-    let approx_wrap_chars = wrap.budget_px.map(|px| (px / char_width).max(1.0) as usize);
+    let approx_wrap_chars = wrap.width.map(|px| (px / char_width).max(1.0) as usize);
     let visible =
         |buffer_line: usize| -> bool { hidden.map(|h| h.is_visible(buffer_line)).unwrap_or(true) };
 
@@ -132,12 +127,10 @@ pub(crate) fn produce_layouts(
             &mut DisplayLayout,
             Option<&HiddenLines>,
             Option<&LineStyles>,
-            Option<&LayoutWrap>,
+            Option<&TextBounds>,
             Option<&super::tuning::LayoutTuning>,
         ),
-        // Block-driven entities have their layout written by
-        // `produce_block_layout`; skip them here to avoid double-writes.
-        (With<TextView>, Without<BlockList>),
+        With<TextView>,
     >,
     mut atlas: ResMut<GlyphAtlas>,
     fonts: Res<Assets<bevy::text::Font>>,
@@ -184,7 +177,7 @@ pub(crate) fn produce_layouts(
             style_arc_addr,
             hidden_arc_addr,
             wrap_budget_bits: wrap
-                .budget_px
+                .width
                 .map(|v| v.to_bits() as u64)
                 .unwrap_or(u64::MAX),
             wrap_indent_bits: wrap.indent_px.to_bits(),
@@ -259,7 +252,7 @@ pub(crate) fn build_display_layout(
     metrics: &mut ContentMetrics,
     viewport: &TextViewport,
     font: &TextFont,
-    wrap: LayoutWrap,
+    wrap: TextBounds,
     default_fg: Color,
     hidden: Option<&HiddenLines>,
     styles: Option<&LineStyles>,
@@ -267,8 +260,8 @@ pub(crate) fn build_display_layout(
     fonts: Option<&Assets<bevy::text::Font>>,
     buffer_lines: u32,
 ) -> DisplayLayout {
-    let LayoutWrap {
-        budget_px: wrap_budget_px,
+    let TextBounds {
+        width: wrap_width,
         indent_px: wrap_indent_px,
     } = wrap;
     let line_height = font.line_height;
@@ -294,7 +287,7 @@ pub(crate) fn build_display_layout(
     let visible_count = ((viewport.height as f32 + buf_px * 2.0) / line_height).ceil() as u32;
     let last_visible_display_row = first_visible_display_row + visible_count;
 
-    let approx_wrap_chars = wrap_budget_px.map(|px| (px / char_width).max(1.0) as usize);
+    let approx_wrap_chars = wrap_width.map(|px| (px / char_width).max(1.0) as usize);
     let fast_path_start = (first_visible_display_row as usize).min(total_buffer_lines);
     let folding_in_play =
         approx_wrap_chars.is_none() && (0..fast_path_start).any(|l| !line_visible(l));
@@ -386,7 +379,7 @@ pub(crate) fn build_display_layout(
 
         // When wrap is on and the shaped line exceeds the budget, split into
         // multiple rows. Otherwise emit a single row covering the full text.
-        let wrap_split = match (wrap_budget_px, shape.as_ref()) {
+        let wrap_split = match (wrap_width, shape.as_ref()) {
             (Some(budget), Some(s)) if s.width > budget => {
                 Some(wrap_into_rows(&render_text, &runs, s, budget))
             }
@@ -462,7 +455,6 @@ pub(crate) fn build_display_layout(
 
     DisplayLayout {
         lines: Arc::new(shaped_lines),
-        block_rects: Arc::new(Vec::new()),
         visible_rows: visible_rows_start..visible_rows_end,
         total_display_rows,
         line_height,
@@ -652,181 +644,3 @@ pub fn approx_display_rows_for_line(
     }
 }
 
-/// Per-entity dirty key for block-driven layouts.
-#[derive(Clone, PartialEq, Eq)]
-pub(crate) struct BlockLayoutFingerprint {
-    block_arc_addr: usize,
-    font_size_tenths: u32,
-    line_height_tenths: u32,
-    char_width_tenths: u32,
-    wrap_chars: u32,
-    default_fg_bits: [u32; 4],
-}
-
-/// Engine system for the static-content path. Walks every `TextView` entity
-/// carrying a [`BlockList`], reads the current block list, and writes the
-/// entity's `DisplayLayout` via [`Block::layout`].
-///
-/// Skips when the `BlockList`'s Arc identity + font / wrap inputs are
-/// unchanged from the previous run. Producers that want to update the list
-/// should swap in a fresh `BlockList::new(blocks)` so the Arc address moves.
-#[allow(clippy::type_complexity)]
-pub(crate) fn produce_block_layout(
-    mut q: Query<
-        (
-            Entity,
-            &BlockList,
-            &TextFont,
-            &mut DisplayLayout,
-            Option<&LayoutWrap>,
-        ),
-        With<TextView>,
-    >,
-    mut last_fingerprints: Local<HashMap<Entity, BlockLayoutFingerprint>>,
-) {
-    let mut alive: std::collections::HashSet<Entity> = std::collections::HashSet::new();
-    for (entity, blocks, font, mut layout, wrap) in q.iter_mut() {
-        alive.insert(entity);
-        let wrap = wrap.copied().unwrap_or_default();
-        let char_width = font.char_width.max(1.0);
-        let wrap_chars = wrap
-            .budget_px
-            .map(|px| (px / char_width).floor().max(0.0) as u32)
-            .unwrap_or(0);
-
-        let fg_l = layout.default_fg.to_linear();
-        let fingerprint = BlockLayoutFingerprint {
-            block_arc_addr: Arc::as_ptr(&blocks.0) as usize,
-            font_size_tenths: (font.font_size * 10.0) as u32,
-            line_height_tenths: (font.line_height * 10.0) as u32,
-            char_width_tenths: (font.char_width * 10.0) as u32,
-            wrap_chars,
-            default_fg_bits: [
-                fg_l.red.to_bits(),
-                fg_l.green.to_bits(),
-                fg_l.blue.to_bits(),
-                fg_l.alpha.to_bits(),
-            ],
-        };
-        if last_fingerprints.get(&entity) == Some(&fingerprint) {
-            continue;
-        }
-
-        let cfg = BlockLayoutConfig {
-            line_height: font.line_height,
-            char_width: font.char_width,
-            // Mirror of the editor's baseline-offset convention; ~32% of font size.
-            baseline_offset: font.font_size * 0.32,
-            default_fg: layout.default_fg,
-            default_wrap_chars: if wrap_chars > 0 {
-                Some(wrap_chars as usize)
-            } else {
-                None
-            },
-        };
-        *layout = Block::layout(&blocks.0, cfg);
-        last_fingerprints.insert(entity, fingerprint);
-    }
-
-    last_fingerprints.retain(|e, _| alive.contains(e));
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// Smoke-test the Component → system → DisplayLayout flow. Spawn a
-    /// `TextView` entity with a `BlockList`, run `produce_block_layout`
-    /// once via a minimal Schedule, verify the entity's `DisplayLayout`
-    /// has the right rows.
-    #[test]
-    fn produce_block_layout_writes_display_layout() {
-        let mut world = World::new();
-        let blocks = vec![
-            Block::new("hello"),
-            Block::new("world").with_padding(4.0, 4.0),
-        ];
-        let entity = world
-            .spawn((
-                TextView,
-                TextFont::from_font_size(16.0),
-                DisplayLayout::default(),
-                BlockList::new(blocks),
-            ))
-            .id();
-
-        let mut schedule = Schedule::default();
-        schedule.add_systems(produce_block_layout);
-        schedule.run(&mut world);
-
-        let layout = world.get::<DisplayLayout>(entity).expect("layout missing");
-        assert_eq!(layout.lines.len(), 2);
-        assert_eq!(layout.lines[0].text, "hello");
-        assert_eq!(layout.lines[1].text, "world");
-        // padding_top on the second block lifts row 1 by 4px above the
-        // baseline of "16px line height + previous row".
-        assert!(layout.lines[1].y_top > layout.lines[0].y_top + 16.0);
-    }
-
-    /// Re-running the system without swapping the `BlockList` Arc skips
-    /// the rebuild.
-    #[test]
-    fn produce_block_layout_skips_when_arc_unchanged() {
-        let mut world = World::new();
-        let entity = world
-            .spawn((
-                TextView,
-                TextFont::from_font_size(16.0),
-                DisplayLayout::default(),
-                BlockList::new(vec![Block::new("once")]),
-            ))
-            .id();
-
-        let mut schedule = Schedule::default();
-        schedule.add_systems(produce_block_layout);
-        schedule.run(&mut world);
-        let first_arc = world.get::<DisplayLayout>(entity).unwrap().lines.clone();
-
-        schedule.run(&mut world);
-        let second_arc = world.get::<DisplayLayout>(entity).unwrap().lines.clone();
-        // Second run should reuse the same Arc — no rebuild.
-        assert!(Arc::ptr_eq(&first_arc, &second_arc));
-    }
-
-    /// `BlockList` Component cooperates with `LayoutWrap`: the system
-    /// translates `LayoutWrap.budget_px` into a char budget via
-    /// `TextFont.char_width` and applies it as the default wrap.
-    #[test]
-    fn produce_block_layout_honors_layout_wrap() {
-        let mut world = World::new();
-        // 16px font, char_width = 8px, budget_px = 80px → 10-char budget.
-        let mut font = TextFont::from_font_size(16.0);
-        font.char_width = 8.0;
-        let entity = world
-            .spawn((
-                TextView,
-                font,
-                DisplayLayout::default(),
-                BlockList::new(vec![Block::new(
-                    "the quick brown fox jumps over the lazy dog and runs away.",
-                )]),
-                LayoutWrap {
-                    budget_px: Some(80.0),
-                    indent_px: 0.0,
-                },
-            ))
-            .id();
-
-        let mut schedule = Schedule::default();
-        schedule.add_systems(produce_block_layout);
-        schedule.run(&mut world);
-
-        let layout = world.get::<DisplayLayout>(entity).unwrap();
-        // 58 chars / 10-char budget → multiple wrap rows.
-        assert!(
-            layout.lines.len() >= 2,
-            "expected wrap, got {}",
-            layout.lines.len()
-        );
-    }
-}

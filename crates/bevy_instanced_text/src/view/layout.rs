@@ -4,7 +4,7 @@ use bevy::prelude::*;
 use std::ops::Range;
 use std::sync::Arc;
 
-use super::snapshot::{BlockRect, ShapedLine};
+use super::snapshot::ShapedLine;
 
 /// Per-entity rendering snapshot. Written by `display_map::build_display_layout`
 /// (or `trivial_layout`); read-only for the renderer.
@@ -15,11 +15,6 @@ pub struct DisplayLayout {
     /// Visible-window slice of shaped lines. Shared (Arc) so scroll-only and
     /// content-only paths can swap one without rebuilding the other.
     pub lines: Arc<Vec<ShapedLine>>,
-    /// Block-level decorations (background fills, borders) for static-content
-    /// consumers (markdown / chat panels). Empty for editor-driven layouts —
-    /// the editor uses `ShapedLine.line_bg` and per-run backgrounds. The
-    /// renderer paints these as a layer below per-row backgrounds.
-    pub block_rects: Arc<Vec<BlockRect>>,
     /// Display row range covered by `lines` (absolute, into the full document).
     pub visible_rows: Range<u32>,
     /// Total display row count for the entire document (for sizing external scroll UI).
@@ -42,7 +37,6 @@ impl Default for DisplayLayout {
     fn default() -> Self {
         Self {
             lines: Arc::new(Vec::new()),
-            block_rects: Arc::new(Vec::new()),
             visible_rows: 0..0,
             total_display_rows: 0,
             line_height: 16.0,

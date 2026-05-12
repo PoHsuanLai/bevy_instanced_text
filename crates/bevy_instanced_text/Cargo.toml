@@ -23,6 +23,7 @@ bevy = { version = "0.18", default-features = false, features = [
     "bevy_log",
     "bevy_picking",
     "bevy_text",
+    "bevy_ui",
 ] }
 bevy_camera = "0.18"
 
