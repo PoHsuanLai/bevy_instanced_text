@@ -41,7 +41,6 @@ pub struct TextViewRenderSet;
     TextFont,
     MonoFontFaces,
     MonoCellWidth,
-    bevy::text::LineHeight,
     TextBounds,
     LayoutTuning,
     Node,
