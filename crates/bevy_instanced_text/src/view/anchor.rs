@@ -372,7 +372,6 @@ mod tests {
         let viewport = TextViewport {
             width: 800,
             height: 600,
-            hit_test_position: Vec2::ZERO,
             text_area_left: 50.0,
             text_area_top: 8.0,
             gutter_width: 40.0,
@@ -498,7 +497,6 @@ mod tests {
         let viewport = TextViewport {
             width: 800,
             height: 600,
-            hit_test_position: Vec2::ZERO,
             text_area_left: 50.0,
             text_area_top: 8.0,
             gutter_width: 40.0,

@@ -1,8 +1,9 @@
 //! `TextViewport` — internal cache of resolved viewport dimensions.
 //!
-//! Populated every frame by `sync_viewport_from_node` from `ComputedNode`
-//! and `UiGlobalTransform`. Internal code reads this; hosts set `Node`
-//! padding/size and never touch `TextViewport` directly.
+//! Populated every frame by `sync_viewport_from_node` from `ComputedNode`.
+//! Internal code reads this; hosts set `Node` size and padding and never
+//! touch `TextViewport` directly. Hit-testing is handled by Bevy UI's own
+//! picking backend via `ComputedNode::contains_point`.
 
 use bevy::prelude::*;
 
@@ -14,14 +15,12 @@ use bevy::prelude::*;
 pub struct TextViewport {
     pub width: u32,
     pub height: u32,
-    /// Screen-space top-left of the node, derived from `UiGlobalTransform`.
-    pub hit_test_position: bevy::math::Vec2,
     /// Resolved from `Node::padding.left` via `ComputedNode::content_inset`.
     pub text_area_left: f32,
     /// Resolved from `Node::padding.top` via `ComputedNode::content_inset`.
     pub text_area_top: f32,
     /// Kept for internal gutter-width tracking; populated by `bevscode`
-    /// via `sync_viewport_from_node` override or direct insert.
+    /// via `sync_gutter_width`.
     pub gutter_width: f32,
 }
 
@@ -30,7 +29,6 @@ impl Default for TextViewport {
         Self {
             width: 800,
             height: 600,
-            hit_test_position: bevy::math::Vec2::ZERO,
             text_area_left: 0.0,
             text_area_top: 8.0,
             gutter_width: 0.0,

@@ -10,7 +10,6 @@
 use bevy::app::{PluginGroup, PluginGroupBuilder};
 use bevy::prelude::*;
 use bevy::ui::{ComputedNode, IsDefaultUiCamera, UiSystems};
-use bevy::ui::ui_transform::UiGlobalTransform;
 
 use super::font::TextFont;
 use super::layout::DisplayLayout;
@@ -430,39 +429,26 @@ pub fn update_text_views(
     }
 }
 
-/// Sync `TextViewport` from Bevy UI layout each frame.
+/// Sync `TextViewport` width/height from Bevy UI layout each frame.
 ///
 /// Runs in `PostUpdate` after `UiSystems::Layout` so `ComputedNode` is fully
-/// resolved. Hosts set `Node` size and padding; this system propagates those
-/// values into the internal `TextViewport` cache that the rest of the engine reads.
+/// resolved. Hit-testing is now handled by Bevy UI's picking backend directly
+/// via `ComputedNode::contains_point` — no screen-space origin needed here.
 pub fn sync_viewport_from_node(
-    mut q: Query<(&ComputedNode, &UiGlobalTransform, &mut TextViewport), With<TextView>>,
+    mut q: Query<(&ComputedNode, &mut TextViewport), With<TextView>>,
 ) {
-    for (computed, ui_transform, mut viewport) in q.iter_mut() {
+    for (computed, mut viewport) in q.iter_mut() {
         // ComputedNode values are in physical pixels. Convert to logical pixels
         // (world units) by multiplying by inverse_scale_factor (= 1/dpi_scale).
         let inv_scale = computed.inverse_scale_factor();
         let size = computed.size() * inv_scale;
-        // UiGlobalTransform.translation is the node's CENTER in physical pixels.
-        // Subtract half-size to get the top-left, then convert to logical pixels.
-        let center_phys = ui_transform.translation;
-        let half_size_phys = computed.size() * 0.5;
-        let top_left_phys = center_phys - half_size_phys;
-        let top_left = top_left_phys * inv_scale;
         let new_width = size.x as u32;
         let new_height = size.y as u32;
-        let new_hit = top_left;
-        // Owns width/height/hit_test_position only. `text_area_left`/`text_area_top`
-        // / `gutter_width` are host-owned (e.g. bevscode's `sync_gutter_width`) —
-        // overwriting them here causes a per-frame write loop that fires
-        // `Changed<TextViewport>` indefinitely.
-        if viewport.width != new_width
-            || viewport.height != new_height
-            || viewport.hit_test_position != new_hit
-        {
+        // Only write when changed — avoids spurious Changed<TextViewport> every frame.
+        // Host owns gutter/margin fields; touching them here would fire Changed indefinitely.
+        if viewport.width != new_width || viewport.height != new_height {
             viewport.width = new_width;
             viewport.height = new_height;
-            viewport.hit_test_position = new_hit;
         }
     }
 }

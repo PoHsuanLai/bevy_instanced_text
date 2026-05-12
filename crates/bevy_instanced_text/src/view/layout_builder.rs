@@ -670,7 +670,6 @@ mod tests {
         TextViewport {
             width: 800,
             height: 600,
-            hit_test_position: Vec2::ZERO,
             text_area_left: 0.0,
             text_area_top: 0.0,
             gutter_width: 0.0,
