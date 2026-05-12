@@ -17,7 +17,7 @@ use super::font::FontSynthesis;
 use super::layout::{line_x_at_byte, DisplayLayout};
 use super::overlay::TextViewOverlays;
 use super::snapshot::{ShapedLine, StyleRun, TextDecoration};
-use super::viewport::TextViewport;
+use bevy::ui::ComputedNode;
 
 /// Resolved font faces for one render call. The renderer picks per-run
 /// based on `StyleRun.font_weight` (≥600 ⇒ bold) and `StyleRun.italic`,
@@ -152,7 +152,7 @@ pub struct RenderContext {
 pub fn render_layout(
     layout: &DisplayLayout,
     overlays: Option<&TextViewOverlays>,
-    viewport: &TextViewport,
+    viewport: &ComputedNode,
     atlas: &mut GlyphAtlas,
     fonts: &bevy::asset::Assets<bevy::text::Font>,
     ctx: RenderContext,
@@ -171,8 +171,10 @@ pub fn render_layout(
     // centered-ortho convention: viewport's top-left is at
     // `(-width/2, +height/2)` relative to the camera origin. The shader
     // projects directly through the camera's `view.clip_from_world`.
-    let viewport_world_left = viewport.world_left();
-    let viewport_world_top = viewport.world_top();
+    let inv = viewport.inverse_scale_factor();
+    let logical = viewport.size() * inv;
+    let viewport_world_left = -logical.x / 2.0;
+    let viewport_world_top = logical.y / 2.0;
     let line_start_x = content_start_x - horizontal_scroll_offset;
 
     // Single anchor: `line.y_top` is the row's visual top in screen pixels.
@@ -195,7 +197,7 @@ pub fn render_layout(
                 viewport_world_left,
                 viewport_world_top,
                 line_start_x,
-                viewport.width as f32,
+                logical.x,
                 atlas.solid_uv,
                 &mut below_instances,
             );
@@ -233,7 +235,7 @@ pub fn render_layout(
                 uv_min: atlas.solid_uv.uv_min,
                 uv_max: atlas.solid_uv.uv_max,
                 size: Vec2::new(
-                    viewport.width as f32 - margin * 2.0 - bg_x_start,
+                    logical.x - margin * 2.0 - bg_x_start,
                     line_height,
                 ),
                 color: linear_rgba(bg),
@@ -425,7 +427,7 @@ pub fn render_layout(
                 viewport_world_left,
                 viewport_world_top,
                 line_start_x,
-                viewport.width as f32,
+                logical.x,
                 atlas.solid_uv,
                 &mut above_instances,
             );

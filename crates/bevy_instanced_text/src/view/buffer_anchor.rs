@@ -66,11 +66,12 @@ use bevy::ecs::entity::Entity;
 use bevy::ecs::system::{Query, SystemParam};
 use bevy::math::Vec2;
 
+use bevy::ui::ComputedNode;
+
 use super::anchor::{row_metrics_with_baseline, RowMetrics, DEFAULT_BASELINE_OFFSET_RATIO};
 use super::font::TextFont;
 use super::layout::DisplayLayout;
 use super::state::{ScrollState, TextBuffer};
-use super::viewport::TextViewport;
 
 /// Resolved screen / world coordinates for a buffer position.
 ///
@@ -130,7 +131,7 @@ type BufferAnchorQuery<'w, 's> = Query<
     's,
     (
         Entity,
-        &'static TextViewport,
+        &'static ComputedNode,
         &'static ScrollState,
         &'static TextFont,
         &'static TextBuffer,
@@ -155,16 +156,16 @@ impl<'w, 's> BufferAnchorParam<'w, 's> {
     /// UTF-16→byte conversion before calling here.
     ///
     /// Returns `None` only when the entity is missing a required
-    /// component (`TextViewport`, `ScrollState`, `TextFont`,
+    /// component (`ComputedNode`, `ScrollState`, `TextFont`,
     /// `TextBuffer`).
     pub fn at_buffer_pos(&self, entity: Entity, line: u32, character: u32) -> Option<AnchorPoint> {
-        let (_, viewport, scroll, font, _buffer, layout) = self.query.get(entity).ok()?;
-        let metrics = build_metrics(viewport, scroll, font, layout);
+        let (_, computed, scroll, font, _buffer, layout) = self.query.get(entity).ok()?;
+        let metrics = build_metrics(computed, scroll, font, layout);
 
         let (display_row, pixel_x) =
             resolve_display_row_and_x(line, character as usize, font, layout);
 
-        Some(self.build_anchor(viewport, scroll, font, &metrics, display_row, pixel_x))
+        Some(self.build_anchor(computed, scroll, font, &metrics, display_row, pixel_x))
     }
 
     /// Anchor a rope-flavored `char_index` (offset within
@@ -172,28 +173,24 @@ impl<'w, 's> BufferAnchorParam<'w, 's> {
     /// the trigger position as a rope offset rather than `(line,
     /// character)`.
     pub fn at_rope_char_index(&self, entity: Entity, char_index: usize) -> Option<AnchorPoint> {
-        let (_, viewport, scroll, font, buffer, layout) = self.query.get(entity).ok()?;
-        let metrics = build_metrics(viewport, scroll, font, layout);
+        let (_, computed, scroll, font, buffer, layout) = self.query.get(entity).ok()?;
+        let metrics = build_metrics(computed, scroll, font, layout);
 
         let char_index = char_index.min(buffer.rope.len_chars());
         let line_index = buffer.rope.char_to_line(char_index);
         let line_start = buffer.rope.line_to_char(line_index);
         let col_chars = char_index - line_start;
-        // For ASCII-only buffers, char count == byte count. For
-        // non-ASCII, this is approximate — but the rope-char-index
-        // entry point is a convenience for LSP popups that already
-        // store positions as char-offsets, not a precise multibyte API.
         let byte_in_line = col_chars;
 
         let (display_row, pixel_x) =
             resolve_display_row_and_x(line_index as u32, byte_in_line, font, layout);
 
-        Some(self.build_anchor(viewport, scroll, font, &metrics, display_row, pixel_x))
+        Some(self.build_anchor(computed, scroll, font, &metrics, display_row, pixel_x))
     }
 
     fn build_anchor(
         &self,
-        viewport: &TextViewport,
+        computed: &ComputedNode,
         scroll: &ScrollState,
         font: &TextFont,
         metrics: &RowMetrics,
@@ -201,15 +198,16 @@ impl<'w, 's> BufferAnchorParam<'w, 's> {
         pixel_x: f32,
     ) -> AnchorPoint {
         let line_height = font.line_height;
+        let inv = computed.inverse_scale_factor();
+        let logical = computed.size() * inv;
+        let text_area_left = computed.content_inset().min_inset.x * inv;
 
-        // Top-down screen coords relative to the editor panel.
-        let screen_x = viewport.text_area_left + pixel_x - scroll.horizontal_scroll_offset;
+        let screen_x = text_area_left + pixel_x - scroll.horizontal_scroll_offset;
         let screen_y = metrics.row_y_top(display_row);
 
         let screen_top_left = Vec2::new(screen_x, screen_y);
         let screen_below_left = Vec2::new(screen_x, screen_y + line_height);
 
-        // World-space — engine's centered-ortho convention.
         let world_top_left = metrics.cell_world_pos_at_x(display_row, pixel_x);
         let band = metrics.row_glyph_band(display_row);
         let world_band_center = Vec2::new(world_top_left.x, (band.min.y + band.max.y) * 0.5);
@@ -220,8 +218,8 @@ impl<'w, 's> BufferAnchorParam<'w, 's> {
 
         let on_screen = screen_x >= 0.0
             && screen_y >= 0.0
-            && screen_x < viewport.width as f32
-            && screen_y + line_height <= viewport.height as f32;
+            && screen_x < logical.x
+            && screen_y + line_height <= logical.y;
 
         AnchorPoint {
             display_row,
@@ -238,7 +236,7 @@ impl<'w, 's> BufferAnchorParam<'w, 's> {
 }
 
 fn build_metrics(
-    viewport: &TextViewport,
+    computed: &ComputedNode,
     scroll: &ScrollState,
     font: &TextFont,
     layout: Option<&DisplayLayout>,
@@ -246,7 +244,7 @@ fn build_metrics(
     let baseline = layout
         .map(|l| l.baseline_offset)
         .unwrap_or(font.font_size * DEFAULT_BASELINE_OFFSET_RATIO);
-    row_metrics_with_baseline(viewport, scroll, font, baseline)
+    row_metrics_with_baseline(computed, scroll, font, baseline)
 }
 
 fn resolve_display_row_and_x(
@@ -279,14 +277,16 @@ mod tests {
     use bevy::math::Vec2;
     use bevy::prelude::*;
 
+    fn make_computed() -> bevy::ui::ComputedNode {
+        let mut c = bevy::ui::ComputedNode::default();
+        c.size = Vec2::new(800.0, 600.0);
+        c.inverse_scale_factor = 1.0;
+        c.padding.min_inset = Vec2::new(50.0, 8.0);
+        c
+    }
+
     fn make_editor_world() -> (World, Entity) {
-        let viewport = TextViewport {
-            width: 800,
-            height: 600,
-            text_area_left: 50.0,
-            text_area_top: 8.0,
-            gutter_width: 40.0,
-        };
+        let computed = make_computed();
         let scroll = ScrollState {
             scroll_offset: -100.0,
             target_scroll_offset: -100.0,
@@ -309,7 +309,7 @@ mod tests {
         layout.baseline_offset = 14.0 * 0.32;
 
         let mut world = World::new();
-        let entity = world.spawn((viewport, scroll, font, buffer, layout)).id();
+        let entity = world.spawn((computed, scroll, font, buffer, layout)).id();
         (world, entity)
     }
 
@@ -342,13 +342,7 @@ mod tests {
     /// `cursor_screen_pos` used pre-API.
     #[test]
     fn fallback_uses_monospace_columns() {
-        let viewport = TextViewport {
-            width: 800,
-            height: 600,
-            text_area_left: 50.0,
-            text_area_top: 8.0,
-            gutter_width: 40.0,
-        };
+        let computed = make_computed();
         let scroll = ScrollState::default();
         let font = TextFont {
             font: Handle::default(),
@@ -363,7 +357,7 @@ mod tests {
         let buffer = TextBuffer::new("plain text");
 
         let mut world = World::new();
-        let entity = world.spawn((viewport, scroll, font, buffer)).id();
+        let entity = world.spawn((computed, scroll, font, buffer)).id();
 
         let anchor = world
             .run_system_once(move |anchors: BufferAnchorParam| {
@@ -388,13 +382,7 @@ mod tests {
             .unwrap();
 
         // Legacy formula from examples/editor_lsp.rs::cursor_screen_pos.
-        let viewport = TextViewport {
-            width: 800,
-            height: 600,
-            text_area_left: 50.0,
-            text_area_top: 8.0,
-            gutter_width: 40.0,
-        };
+        let computed = make_computed();
         let scroll = ScrollState {
             scroll_offset: -100.0,
             target_scroll_offset: -100.0,
@@ -412,9 +400,10 @@ mod tests {
             font_bold_italic: None,
             font_synthesis: Default::default(),
         };
-        let metrics = super::row_metrics_with_baseline(&viewport, &scroll, &font, 14.0 * 0.32);
+        let metrics = super::row_metrics_with_baseline(&computed, &scroll, &font, 14.0 * 0.32);
+        let text_area_left = computed.content_inset().min_inset.x * computed.inverse_scale_factor();
         let expected_screen_x =
-            viewport.text_area_left + 3.0 * font.char_width - scroll.horizontal_scroll_offset;
+            text_area_left + 3.0 * font.char_width - scroll.horizontal_scroll_offset;
         let expected_screen_y = metrics.row_y_top(1);
 
         assert!((anchor.screen_top_left.x - expected_screen_x).abs() < 1e-3);
@@ -433,13 +422,7 @@ mod tests {
             })
             .unwrap();
 
-        let viewport = TextViewport {
-            width: 800,
-            height: 600,
-            text_area_left: 50.0,
-            text_area_top: 8.0,
-            gutter_width: 40.0,
-        };
+        let computed = make_computed();
         let scroll = ScrollState {
             scroll_offset: -100.0,
             target_scroll_offset: -100.0,
@@ -457,7 +440,7 @@ mod tests {
             font_bold_italic: None,
             font_synthesis: Default::default(),
         };
-        let metrics = super::row_metrics_with_baseline(&viewport, &scroll, &font, 14.0 * 0.32);
+        let metrics = super::row_metrics_with_baseline(&computed, &scroll, &font, 14.0 * 0.32);
         let expected = metrics.cell_world_pos_at_x(2, 4.0 * font.char_width);
 
         assert!((anchor.world_top_left - expected).length() < 1e-3);

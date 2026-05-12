@@ -78,10 +78,9 @@ impl DisplayLayout {
     /// `display_row`. `x` includes the row's `x_offset` (indent), `y_top`
     /// is the row's pre-computed top edge in layout-local coords.
     ///
-    /// Hosts wanting world-space coordinates add the
-    /// [`super::viewport::TextViewport`] origin themselves — this
-    /// helper stays viewport-agnostic so it works for hosts that compose
-    /// multiple viewports / RenderLayers.
+    /// Hosts wanting world-space coordinates add the `ComputedNode`-derived
+    /// origin themselves — this helper stays viewport-agnostic so it works
+    /// for hosts that compose multiple viewports / RenderLayers.
     ///
     /// Use case: anchoring inline decorations (images, buttons, gauges)
     /// inside a markdown / chat / log view. Producers attach their own

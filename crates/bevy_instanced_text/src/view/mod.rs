@@ -1,4 +1,4 @@
-//! View primitives: rope-backed text state, viewport, paint-ready layout, overlays, renderer.
+//! View primitives: rope-backed text state, paint-ready layout, overlays, renderer.
 
 pub mod anchor;
 pub mod buffer_anchor;
@@ -13,7 +13,6 @@ pub mod state;
 pub mod styling;
 pub mod theme;
 pub mod tuning;
-pub mod viewport;
 
 pub use anchor::{
     row_metrics, row_metrics_with_baseline, RowMetrics, RowMetricsParam,
@@ -40,4 +39,3 @@ pub use state::{ContentMetrics, ScrollState, TextBuffer};
 pub use styling::{HiddenLines, LineStyles, RunWithText, TextBounds};
 pub use theme::{TextBackgroundColor, TextColor};
 pub use tuning::LayoutTuning;
-pub use viewport::TextViewport;

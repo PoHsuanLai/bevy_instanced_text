@@ -18,7 +18,7 @@ use super::plugin::TextView;
 use super::snapshot::{LineShape, ShapedGlyph, ShapedLine, StyleRun};
 use super::state::{ContentMetrics, ScrollState, TextBuffer};
 use super::styling::{HiddenLines, LineStyles, RunWithText, TextBounds};
-use super::viewport::TextViewport;
+use bevy::ui::ComputedNode;
 use crate::gpu::GlyphAtlas;
 
 /// Default extra rows kept above and below the visible window.
@@ -63,7 +63,8 @@ pub struct LayoutFingerprint {
 pub fn visible_buffer_range(
     buffer: &TextBuffer,
     scroll: &ScrollState,
-    viewport: &TextViewport,
+    viewport_height: f32,
+    text_area_top: f32,
     font: &TextFont,
     wrap: TextBounds,
     hidden: Option<&HiddenLines>,
@@ -77,9 +78,9 @@ pub fn visible_buffer_range(
 
     let buf_px = line_height * VIEWPORT_BUFFER_LINES as f32;
     let scroll_dist = scroll.scroll_offset.abs();
-    let start_pixels = scroll_dist - viewport.text_area_top - buf_px;
+    let start_pixels = scroll_dist - text_area_top - buf_px;
     let first_visible_display_row = (start_pixels / line_height).floor().max(0.0) as u32;
-    let visible_count = ((viewport.height as f32 + buf_px * 2.0) / line_height).ceil() as u32;
+    let visible_count = ((viewport_height + buf_px * 2.0) / line_height).ceil() as u32;
     let last_visible_display_row = first_visible_display_row + visible_count;
 
     let approx_wrap_chars = wrap.width.map(|px| (px / char_width).max(1.0) as usize);
@@ -126,7 +127,7 @@ pub fn produce_layouts(
             &TextBuffer,
             &ScrollState,
             &mut ContentMetrics,
-            &TextViewport,
+            &ComputedNode,
             &TextFont,
             &mut DisplayLayout,
             Option<&HiddenLines>,
@@ -169,13 +170,16 @@ pub fn produce_layouts(
             .unwrap_or(0);
         let hidden_arc_addr = hidden.map(|h| Arc::as_ptr(&h.0) as usize).unwrap_or(0);
 
+        let inv = tv_viewport.inverse_scale_factor();
+        let logical = tv_viewport.size() * inv;
+        let text_area_top = tv_viewport.content_inset().min_inset.y * inv;
         let fingerprint = LayoutFingerprint {
             content_version: buffer.content_version,
             scroll_bits: scroll.scroll_offset.to_bits(),
             h_scroll_bits: scroll.horizontal_scroll_offset.to_bits(),
-            viewport_w: tv_viewport.width,
-            viewport_h: tv_viewport.height,
-            viewport_top_bits: tv_viewport.text_area_top.to_bits(),
+            viewport_w: logical.x as u32,
+            viewport_h: logical.y as u32,
+            viewport_top_bits: text_area_top.to_bits(),
             font_size_tenths: (font.font_size * 10.0) as u32,
             line_height_tenths: (font.line_height * 10.0) as u32,
             style_arc_addr,
@@ -254,7 +258,7 @@ pub(crate) fn build_display_layout(
     buffer: &TextBuffer,
     scroll: &ScrollState,
     metrics: &mut ContentMetrics,
-    viewport: &TextViewport,
+    viewport: &ComputedNode,
     font: &TextFont,
     wrap: TextBounds,
     default_fg: Color,
@@ -284,11 +288,14 @@ pub(crate) fn build_display_layout(
 
     // Visible range — same math as the helper, inlined here to also feed
     // first/last_visible_display_row for the y_top calculation.
+    let inv = viewport.inverse_scale_factor();
+    let logical = viewport.size() * inv;
+    let text_area_top = viewport.content_inset().min_inset.y * inv;
     let buf_px = line_height * buffer_lines as f32;
     let scroll_dist = scroll.scroll_offset.abs();
-    let start_pixels = scroll_dist - viewport.text_area_top - buf_px;
+    let start_pixels = scroll_dist - text_area_top - buf_px;
     let first_visible_display_row = (start_pixels / line_height).floor().max(0.0) as u32;
-    let visible_count = ((viewport.height as f32 + buf_px * 2.0) / line_height).ceil() as u32;
+    let visible_count = ((logical.y + buf_px * 2.0) / line_height).ceil() as u32;
     let last_visible_display_row = first_visible_display_row + visible_count;
 
     let approx_wrap_chars = wrap_width.map(|px| (px / char_width).max(1.0) as usize);
@@ -378,7 +385,7 @@ pub(crate) fn build_display_layout(
         // applied. Renderer + overlay math derive baseline / band positions
         // from this, so `y_top` consistently means "top of the leaded box".
         let y_top_for = |display_row: u32| -> f32 {
-            viewport.text_area_top + scroll.scroll_offset + display_row as f32 * line_height
+            text_area_top + scroll.scroll_offset + display_row as f32 * line_height
         };
 
         // When wrap is on and the shaped line exceeds the budget, split into
@@ -666,14 +673,11 @@ mod tests {
         }
     }
 
-    fn test_viewport() -> TextViewport {
-        TextViewport {
-            width: 800,
-            height: 600,
-            text_area_left: 0.0,
-            text_area_top: 0.0,
-            gutter_width: 0.0,
-        }
+    fn test_computed() -> ComputedNode {
+        let mut c = ComputedNode::default();
+        c.size = bevy::math::Vec2::new(800.0, 600.0);
+        c.inverse_scale_factor = 1.0;
+        c
     }
 
     fn build(buffer: &TextBuffer) -> DisplayLayout {
@@ -682,7 +686,7 @@ mod tests {
             buffer,
             &ScrollState::default(),
             &mut metrics,
-            &test_viewport(),
+            &test_computed(),
             &test_font(),
             TextBounds::default(),
             Color::WHITE,
@@ -802,7 +806,7 @@ mod tests {
                 TextBuffer::new("hello world\nsecond line\nthird line\n"),
                 ScrollState::default(),
                 ContentMetrics::default(),
-                test_viewport(),
+                test_computed(),
                 test_font(),
                 DisplayLayout::default(),
                 TextBounds::default(),

@@ -35,10 +35,10 @@
 //! # use bevy_instanced_text::TextFont;
 //! # use bevy_instanced_text::view::anchor::row_metrics;
 //! fn position_my_popup(
-//!     editor: Query<(&TextViewport, &ScrollState, &TextFont, &DisplayLayout)>,
+//!     editor: Query<(&ComputedNode, &ScrollState, &TextFont, &DisplayLayout)>,
 //! ) {
-//!     let (viewport, scroll, font, layout) = editor.single().unwrap();
-//!     let metrics = row_metrics(viewport, scroll, font);
+//!     let (computed, scroll, font, layout) = editor.single().unwrap();
+//!     let metrics = row_metrics(computed, scroll, font);
 //!     // World-space rect of the visible glyph band on display row 12.
 //!     let band = metrics.row_glyph_band(12);
 //!     let popup_pos = band.min - bevy::math::Vec2::new(0.0, 100.0);
@@ -50,10 +50,10 @@
 //! exercised by tests in this module to keep them in lockstep.
 
 use bevy::math::{Rect, Vec2};
+use bevy::ui::ComputedNode;
 
 use super::font::TextFont;
 use super::state::ScrollState;
-use super::viewport::TextViewport;
 
 /// Default baseline-offset ratio matching `TextFont::from_size` /
 /// `layout_builder` defaults: ~32% of font size. Consumers that don't
@@ -106,9 +106,9 @@ pub struct RowMetrics {
 /// [`row_metrics_with_baseline`] passing `layout.baseline_offset` — that
 /// stays byte-identical with the renderer even when the layout
 /// customizes the baseline.
-pub fn row_metrics(viewport: &TextViewport, scroll: &ScrollState, font: &TextFont) -> RowMetrics {
+pub fn row_metrics(computed: &ComputedNode, scroll: &ScrollState, font: &TextFont) -> RowMetrics {
     row_metrics_with_baseline(
-        viewport,
+        computed,
         scroll,
         font,
         font.font_size * DEFAULT_BASELINE_OFFSET_RATIO,
@@ -118,17 +118,22 @@ pub fn row_metrics(viewport: &TextViewport, scroll: &ScrollState, font: &TextFon
 /// As [`row_metrics`] but lets the caller pass an explicit
 /// `baseline_offset` (e.g. read from `DisplayLayout::baseline_offset`).
 pub fn row_metrics_with_baseline(
-    viewport: &TextViewport,
+    computed: &ComputedNode,
     scroll: &ScrollState,
     font: &TextFont,
     baseline_offset: f32,
 ) -> RowMetrics {
+    let inv = computed.inverse_scale_factor();
+    let logical = computed.size() * inv;
+    let inset = computed.content_inset();
+    let text_area_left = inset.min_inset.x * inv;
+    let text_area_top = inset.min_inset.y * inv;
     RowMetrics {
-        world_top: viewport.world_top(),
-        world_left: viewport.world_left(),
-        text_area_top_with_scroll: viewport.text_area_top + scroll.scroll_offset,
-        text_area_left: viewport.text_area_left,
-        viewport_width: viewport.width as f32,
+        world_top: logical.y / 2.0,
+        world_left: -logical.x / 2.0,
+        text_area_top_with_scroll: text_area_top + scroll.scroll_offset,
+        text_area_left,
+        viewport_width: logical.x,
         char_width: font.char_width,
         line_height: font.line_height,
         baseline_offset,
@@ -310,7 +315,7 @@ pub struct RowMetricsParam<'w, 's> {
         's,
         (
             bevy::ecs::entity::Entity,
-            &'static TextViewport,
+            &'static bevy::ui::ComputedNode,
             &'static ScrollState,
             &'static TextFont,
             Option<&'static super::layout::DisplayLayout>,
@@ -321,13 +326,13 @@ pub struct RowMetricsParam<'w, 's> {
 impl<'w, 's> RowMetricsParam<'w, 's> {
     /// Build a `RowMetrics` snapshot for the given editor entity.
     /// Returns `None` when the entity is missing a required component
-    /// (`TextViewport`, `ScrollState`, or `TextFont`).
+    /// (`ComputedNode`, `ScrollState`, or `TextFont`).
     pub fn get(&self, entity: bevy::ecs::entity::Entity) -> Option<RowMetrics> {
-        let (_, viewport, scroll, font, layout) = self.query.get(entity).ok()?;
+        let (_, computed, scroll, font, layout) = self.query.get(entity).ok()?;
         let baseline = layout
             .map(|l| l.baseline_offset)
             .unwrap_or(font.font_size * DEFAULT_BASELINE_OFFSET_RATIO);
-        Some(row_metrics_with_baseline(viewport, scroll, font, baseline))
+        Some(row_metrics_with_baseline(computed, scroll, font, baseline))
     }
 
     /// As [`get`](Self::get) but `panic`s when the entity is missing
@@ -338,7 +343,7 @@ impl<'w, 's> RowMetricsParam<'w, 's> {
         self.get(entity).unwrap_or_else(|| {
             panic!(
                 "RowMetricsParam: entity {:?} is missing one of \
-                 (TextViewport, ScrollState, TextFont)",
+                 (ComputedNode, ScrollState, TextFont)",
                 entity
             )
         })
@@ -350,13 +355,13 @@ impl<'w, 's> RowMetricsParam<'w, 's> {
     pub fn iter(&self) -> impl Iterator<Item = (bevy::ecs::entity::Entity, RowMetrics)> + '_ {
         self.query
             .iter()
-            .map(|(entity, viewport, scroll, font, layout)| {
+            .map(|(entity, computed, scroll, font, layout)| {
                 let baseline = layout
                     .map(|l| l.baseline_offset)
                     .unwrap_or(font.font_size * DEFAULT_BASELINE_OFFSET_RATIO);
                 (
                     entity,
-                    row_metrics_with_baseline(viewport, scroll, font, baseline),
+                    row_metrics_with_baseline(computed, scroll, font, baseline),
                 )
             })
     }
@@ -369,13 +374,11 @@ mod tests {
     use bevy::asset::Handle;
 
     fn make_metrics() -> RowMetrics {
-        let viewport = TextViewport {
-            width: 800,
-            height: 600,
-            text_area_left: 50.0,
-            text_area_top: 8.0,
-            gutter_width: 40.0,
-        };
+        // 800x600 logical at 1x DPI; padding.left=50, padding.top=8.
+        let mut computed = bevy::ui::ComputedNode::default();
+        computed.size = bevy::math::Vec2::new(800.0, 600.0);
+        computed.inverse_scale_factor = 1.0;
+        computed.padding.min_inset = bevy::math::Vec2::new(50.0, 8.0);
         let scroll = ScrollState {
             scroll_offset: -100.0,
             target_scroll_offset: -100.0,
@@ -394,7 +397,7 @@ mod tests {
             font_synthesis: Default::default(),
         };
         // baseline_offset matching TextFont::from_size / layout default.
-        row_metrics_with_baseline(&viewport, &scroll, &font, 14.0 * 0.32)
+        row_metrics_with_baseline(&computed, &scroll, &font, 14.0 * 0.32)
     }
 
     /// `row_glyph_band`'s world-Y must agree with what
@@ -494,13 +497,10 @@ mod tests {
         use bevy::prelude::*;
 
         let mut world = World::new();
-        let viewport = TextViewport {
-            width: 800,
-            height: 600,
-            text_area_left: 50.0,
-            text_area_top: 8.0,
-            gutter_width: 40.0,
-        };
+        let mut computed = bevy::ui::ComputedNode::default();
+        computed.size = bevy::math::Vec2::new(800.0, 600.0);
+        computed.inverse_scale_factor = 1.0;
+        computed.padding.min_inset = bevy::math::Vec2::new(50.0, 8.0);
         let scroll = ScrollState {
             scroll_offset: -100.0,
             target_scroll_offset: -100.0,
@@ -523,10 +523,10 @@ mod tests {
 
         // Compute the expected snapshot before moving the components
         // into the entity (`ScrollState` isn't `Clone`).
-        let direct = row_metrics_with_baseline(&viewport, &scroll, &font, layout.baseline_offset);
+        let direct = row_metrics_with_baseline(&computed, &scroll, &font, layout.baseline_offset);
 
         let entity = world
-            .spawn((viewport, scroll, font.clone(), layout.clone()))
+            .spawn((computed, scroll, font.clone(), layout.clone()))
             .id();
 
         let result = world

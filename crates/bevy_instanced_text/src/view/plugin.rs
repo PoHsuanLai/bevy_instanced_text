@@ -20,7 +20,6 @@ use super::state::{CompositeStops, ContentMetrics, ScrollAnimation, ScrollState,
 use super::styling::TextBounds;
 use super::theme::{TextBackgroundColor, TextColor};
 use super::tuning::LayoutTuning;
-use super::viewport::TextViewport;
 use crate::gpu::{atlas_ready, GlyphAtlas, GlyphAtlasPlugin, InstancedTextRenderPlugin};
 
 /// Contains `update_text_views`. Order downstream `.after(TextViewRenderSet)`.
@@ -37,7 +36,6 @@ pub struct TextViewRenderSet;
     TextBuffer,
     ScrollState,
     ContentMetrics,
-    TextViewport,
     DisplayLayout,
     TextViewOverlays,
     TextFont,
@@ -76,7 +74,7 @@ impl Plugin for InstancedTextPlugin {
             .register_type::<TextBuffer>()
             .register_type::<ScrollState>()
             .register_type::<ContentMetrics>()
-            .register_type::<TextViewport>();
+            ;
 
         app.add_systems(Update, animate_text_view_scroll);
 
@@ -89,11 +87,10 @@ impl Plugin for InstancedTextPlugin {
         app.add_systems(
             PostUpdate,
             (
-                sync_viewport_from_node.after(UiSystems::Layout),
                 produce_layouts
                     .run_if(atlas_ready)
                     .in_set(LayoutProduceSet)
-                    .after(sync_viewport_from_node)
+                    .after(UiSystems::Layout)
                     .before(prewarm_atlas_for_layout),
                 prewarm_atlas_for_layout
                     .run_if(atlas_ready)
@@ -182,14 +179,16 @@ fn build_animation(from: f32, to: f32, duration: f32, viewport_size: f32) -> Scr
 }
 
 fn animate_text_view_scroll(
-    mut query: Query<(&mut ScrollState, &TextViewport), With<TextView>>,
+    mut query: Query<(&mut ScrollState, &ComputedNode), With<TextView>>,
     time: Res<Time>,
 ) {
     let dt = time.delta_secs();
 
-    for (mut state, viewport) in query.iter_mut() {
-        let viewport_h = viewport.height as f32;
-        let viewport_w = viewport.width as f32;
+    for (mut state, computed) in query.iter_mut() {
+        let inv = computed.inverse_scale_factor();
+        let logical = computed.size() * inv;
+        let viewport_h = logical.y;
+        let viewport_w = logical.x;
 
         // Read current values without triggering change detection.
         let (duration, target_v, scroll_v, target_h, scroll_h, has_v_anim, has_h_anim) = {
@@ -297,7 +296,7 @@ pub fn update_text_views(
         (
             Entity,
             &ScrollState,
-            &TextViewport,
+            &ComputedNode,
             &TextFont,
             Ref<DisplayLayout>,
             Option<Ref<TextViewOverlays>>,
@@ -311,7 +310,7 @@ pub fn update_text_views(
     fonts: Res<Assets<bevy::text::Font>>,
 ) {
     let _span = bevy::prelude::info_span!("update_text_views").entered();
-    for (tv_entity, scroll, viewport, font, layout, overlays, batch_entity_opt, render_layers) in
+    for (tv_entity, scroll, computed, font, layout, overlays, batch_entity_opt, render_layers) in
         text_views.iter_mut()
     {
         let regular = atlas.ensure_font(&font.font, &fonts);
@@ -341,18 +340,17 @@ pub fn update_text_views(
         }
         let layout: &DisplayLayout = &layout;
         let overlays = overlays.as_deref();
-        let content_start_x = if viewport.gutter_width > 0.0 {
-            viewport.text_area_left.max(viewport.gutter_width)
-        } else {
-            viewport.text_area_left
-        };
+        // text_area_left = padding.left from ComputedNode (set by host via Node::padding).
+        // gutter_width is host-managed and always <= text_area_left, so content_start_x = text_area_left.
+        let inv = computed.inverse_scale_factor();
+        let content_start_x = computed.content_inset().min_inset.x * inv;
 
         let instances = {
             let _render_span = bevy::prelude::info_span!("render_layout").entered();
             render_layout(
                 layout,
                 overlays,
-                viewport,
+                computed,
                 &mut atlas,
                 &fonts,
                 super::render::RenderContext {
@@ -366,11 +364,13 @@ pub fn update_text_views(
 
         atlas.update_texture(&mut images);
 
+        let logical = computed.size() * inv;
+        let text_area_top = computed.content_inset().min_inset.y * inv;
         let line_height = layout.line_height;
         let scroll_dist = scroll.scroll_offset.abs();
-        let start_pixels = scroll_dist - viewport.text_area_top;
+        let start_pixels = scroll_dist - text_area_top;
         let first_visible = (start_pixels / line_height).floor().max(0.0) as usize;
-        let visible_count = ((viewport.height as f32) / line_height).ceil() as usize;
+        let visible_count = (logical.y / line_height).ceil() as usize;
         let last_visible = first_visible + visible_count;
 
         let batch_data = TextViewBatch {
@@ -378,8 +378,8 @@ pub fn update_text_views(
             built_at_horizontal_scroll: scroll.horizontal_scroll_offset,
             first_line: first_visible,
             last_line: last_visible,
-            built_at_width: viewport.width,
-            built_at_height: viewport.height,
+            built_at_width: logical.x as u32,
+            built_at_height: logical.y as u32,
         };
 
         if instances.is_empty() {
@@ -429,37 +429,6 @@ pub fn update_text_views(
     }
 }
 
-/// Sync `TextViewport` from Bevy UI layout each frame.
-///
-/// Runs in `PostUpdate` after `UiSystems::Layout` so `ComputedNode` is fully
-/// resolved. Derives width/height from node size and text_area_left/top from
-/// `content_inset` (i.e. resolved `Node::padding`). Hit-testing is handled by
-/// Bevy UI's picking backend — no screen-space origin needed.
-pub fn sync_viewport_from_node(
-    mut q: Query<(&ComputedNode, &mut TextViewport), With<TextView>>,
-) {
-    for (computed, mut viewport) in q.iter_mut() {
-        // ComputedNode values are in physical pixels; convert to logical via inverse_scale_factor.
-        let inv_scale = computed.inverse_scale_factor();
-        let size = computed.size() * inv_scale;
-        let inset = computed.content_inset();
-        let new_width = size.x as u32;
-        let new_height = size.y as u32;
-        let new_left = inset.min_inset.x * inv_scale;
-        let new_top = inset.min_inset.y * inv_scale;
-        // Only write when changed — avoids spurious Changed<TextViewport> every frame.
-        if viewport.width != new_width
-            || viewport.height != new_height
-            || (viewport.text_area_left - new_left).abs() > 0.01
-            || (viewport.text_area_top - new_top).abs() > 0.01
-        {
-            viewport.width = new_width;
-            viewport.height = new_height;
-            viewport.text_area_left = new_left;
-            viewport.text_area_top = new_top;
-        }
-    }
-}
 
 /// Mark one camera as the default UI camera if none is marked yet.
 /// This lets Bevy UI resolve `Val::Percent` sizes for `TextView` `Node` entities
