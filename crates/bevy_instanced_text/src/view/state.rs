@@ -102,49 +102,82 @@ impl TextSpan {
     }
 }
 
+/// Compute `line(i)` for a `&str` body following the ropey convention:
+/// the slice **includes its trailing `\n`** when one is present. The final
+/// virtual empty line after a trailing newline is reported as `""`.
+fn line_slice(body: &str, i: usize) -> &str {
+    let mut start = 0usize;
+    let mut current_line = 0usize;
+    let bytes = body.as_bytes();
+    while start <= bytes.len() {
+        if current_line == i {
+            // Find next '\n' at-or-after `start`; include it in the slice.
+            let rest = &body[start..];
+            let end_byte = match rest.find('\n') {
+                Some(p) => start + p + 1, // include the '\n'
+                None => bytes.len(),
+            };
+            return &body[start..end_byte];
+        }
+        // Advance to the next line start (one past the next '\n').
+        let rest = &body[start..];
+        match rest.find('\n') {
+            Some(p) => {
+                start += p + 1;
+                current_line += 1;
+            }
+            None => return "", // Past the last line
+        }
+    }
+    ""
+}
+
+/// Count lines in a `&str` using the ropey convention: a trailing `\n` adds
+/// a virtual empty line, and an empty string has one line.
+fn line_count_of(body: &str) -> usize {
+    if body.is_empty() {
+        return 1;
+    }
+    let newlines = body.as_bytes().iter().filter(|&&b| b == b'\n').count();
+    // Each '\n' separates a line from the next; if the string ends with '\n'
+    // there is a virtual empty line after.
+    if body.ends_with('\n') {
+        newlines + 1
+    } else {
+        newlines + 1
+    }
+}
+
 impl TextContent for TextSpan {
     fn line_count(&self) -> usize {
-        if self.0.is_empty() {
-            1
-        } else {
-            let n = self.0.lines().count();
-            if self.0.ends_with('\n') { n + 1 } else { n }
-        }
+        line_count_of(&self.0)
     }
 
     fn line(&self, i: usize) -> Cow<'_, str> {
-        let mut lines = self.0.split('\n');
-        Cow::Borrowed(lines.nth(i).unwrap_or(""))
+        Cow::Borrowed(line_slice(&self.0, i))
     }
 
     fn line_len_chars(&self, i: usize) -> usize {
-        self.0.split('\n')
-            .nth(i)
-            .map(|l| l.chars().count())
-            .unwrap_or(0)
+        let l = line_slice(&self.0, i);
+        // Spec: exclude trailing '\n'.
+        let stripped = l.strip_suffix('\n').unwrap_or(l);
+        stripped.chars().count()
     }
 }
 
 impl TextContent for String {
     fn line_count(&self) -> usize {
-        if self.is_empty() {
-            1
-        } else {
-            let n = self.lines().count();
-            if self.ends_with('\n') { n + 1 } else { n }
-        }
+        line_count_of(self)
     }
 
     fn line(&self, i: usize) -> Cow<'_, str> {
-        let mut lines = self.split('\n');
-        Cow::Borrowed(lines.nth(i).unwrap_or(""))
+        Cow::Borrowed(line_slice(self, i))
     }
 
     fn line_len_chars(&self, i: usize) -> usize {
-        self.split('\n')
-            .nth(i)
-            .map(|l| l.chars().count())
-            .unwrap_or(0)
+        let l = line_slice(self, i);
+        let stripped = l.strip_suffix('\n').unwrap_or(l);
+        stripped.chars().count()
     }
 }
 

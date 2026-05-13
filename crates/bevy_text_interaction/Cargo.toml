@@ -1,0 +1,49 @@
+[package]
+name = "bevy_text_interaction"
+version = "0.1.1"
+edition = "2021"
+authors = ["PoHsuanLai"]
+license = "MIT OR Apache-2.0"
+description = "Shared UI primitives for bevy_instanced_text views: clipboard, selection, caret rendering, picking observers. No ropey dependency — terminals, labels, and editors all consume from here."
+repository = "https://github.com/PoHsuanLai/bevscode"
+keywords = ["bevy", "text", "selection", "clipboard", "picking"]
+categories = ["game-development"]
+
+[features]
+default = ["arboard"]
+# `arboard`-backed `SystemClipboard`. Disable for headless / web / sandboxed
+# builds and substitute your own provider via
+# `insert_resource(ClipboardResource::new(...))`.
+arboard = ["dep:arboard"]
+# `web-sys`-backed `WasmClipboard`. Write is fire-and-forget via async
+# `navigator.clipboard.writeText`; read returns `None`.
+clipboard-wasm = ["dep:wasm-bindgen", "dep:wasm-bindgen-futures", "dep:js-sys", "dep:web-sys"]
+
+[dependencies]
+bevy_instanced_text = { path = "../bevy_instanced_text", version = "0.1.1" }
+
+bevy = { version = "0.18", default-features = false, features = [
+    "bevy_render",
+    "bevy_core_pipeline",
+    "bevy_asset",
+    "bevy_text",
+    "default_font",
+    "bevy_sprite",
+    "bevy_sprite_render",
+    "bevy_color",
+    "bevy_mesh",
+    "bevy_camera",
+    "bevy_input_focus",
+    "bevy_picking",
+    "bevy_ui",
+] }
+
+arboard = { version = "3.4", optional = true }
+serde = { version = "1.0", features = ["derive"] }
+wasm-bindgen = { version = "0.2", optional = true }
+wasm-bindgen-futures = { version = "0.4", optional = true }
+js-sys = { version = "0.3", optional = true }
+web-sys = { version = "0.3", optional = true, features = ["Navigator", "Window", "Clipboard"] }
+
+[dev-dependencies]
+bevy = { version = "0.18", features = ["bevy_window", "bevy_winit"] }
