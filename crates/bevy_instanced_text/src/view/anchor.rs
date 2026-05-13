@@ -1,29 +1,10 @@
-//! World-space positioning helpers for text-view consumers.
+//! Row-anchor positioning helpers in node-local logical pixels (top-left
+//! origin, +Y down) — the same space `Node::top`/`Node::left` consume.
 //!
-//! `bevy_instanced_text` emits glyph quads using a specific row-anchor
-//! convention (top-of-leaded-box at `text_area_top + scroll_offset +
-//! display_row * line_height`, glyph baseline derived from row top, etc.).
-//! Any consumer that wants to position a non-overlay entity (a popup, a
-//! sprite, a custom mesh) over a particular row or character cell needs
-//! to apply that same convention.
-//!
-//! Rather than have each consumer reproduce the math (and silently
-//! drift when the engine's convention shifts), they should call into
-//! these helpers. The helpers are derived from the same constants the
-//! renderer uses — by construction they can't get out of sync with what
-//! `render_layout` paints.
-//!
-//! For row-aligned visual decorations (selection backgrounds, highlight
-//! bars, indent guides, bracket boxes), prefer pushing a [`RectOverlay`]
-//! into [`TextViewOverlays`] — the engine paints those itself and you
-//! don't need this module at all. Reach for these helpers only for
-//! consumers that can't fit into the overlay model: Bevy UI nodes,
-//! freestanding sprites, popups, or anything outside the engine's draw.
-//!
-//! All helpers return values in the **centered-ortho world space** the
-//! engine renders into: viewport top-left at
-//! `(-width/2, +height/2)`, +Y up. A `Camera2d` placed at the panel
-//! center sees them at the right place.
+//! Prefer pushing a [`RectOverlay`] into [`TextViewOverlays`] for
+//! row-aligned decorations (selections, highlight bars, indent guides);
+//! reach for these helpers only when you need to position a sibling UI
+//! [`Node`](bevy::ui::Node) child relative to a glyph cell.
 //!
 //! [`RectOverlay`]: super::overlay::RectOverlay
 //! [`TextViewOverlays`]: super::overlay::TextViewOverlays
@@ -32,22 +13,26 @@
 //! ```no_run
 //! # use bevy::prelude::*;
 //! # use bevy_instanced_text::prelude::*;
-//! # use bevy_instanced_text::MonoCellWidth;
+//! # use bevy_instanced_text::{MonoCellWidth, resolve_line_height};
 //! # use bevy_instanced_text::view::anchor::row_metrics;
 //! fn position_my_popup(
-//!     editor: Query<(&ComputedNode, &ScrollState, &TextFont, &MonoCellWidth, &DisplayLayout)>,
+//!     editor: Query<(
+//!         &ComputedNode,
+//!         &ScrollState,
+//!         &TextFont,
+//!         &bevy::text::LineHeight,
+//!         &MonoCellWidth,
+//!         &DisplayLayout,
+//!     )>,
 //! ) {
-//!     let (computed, scroll, font, layout) = editor.single().unwrap();
-//!     let metrics = row_metrics(computed, scroll, font);
-//!     // World-space rect of the visible glyph band on display row 12.
+//!     let (computed, scroll, font, lh, mono, _layout) = editor.single().unwrap();
+//!     let line_height = resolve_line_height(*lh, font.font_size);
+//!     let metrics = row_metrics(computed, scroll, font, line_height, mono);
 //!     let band = metrics.row_glyph_band(12);
-//!     let popup_pos = band.min - bevy::math::Vec2::new(0.0, 100.0);
-//!     // commands.spawn(...);
+//!     let popup_top_left = band.min - bevy::math::Vec2::new(0.0, 100.0);
+//!     // commands.spawn(Node { left: Val::Px(popup_top_left.x), top: Val::Px(popup_top_left.y), .. });
 //! }
 //! ```
-//!
-//! Mirrors of the renderer's internal anchor math live here, all
-//! exercised by tests in this module to keep them in lockstep.
 
 use bevy::math::{Rect, Vec2};
 use bevy::ui::ComputedNode;
@@ -56,57 +41,31 @@ use super::font::MonoCellWidth;
 use super::state::ScrollState;
 use bevy::text::TextFont;
 
-/// Default baseline-offset ratio matching `TextFont::from_size` /
-/// `layout_builder` defaults: ~32% of font size. Consumers that don't
-/// have a `DisplayLayout` on hand can pass this into
-/// [`row_metrics_with_baseline`] (or just call [`row_metrics`] which
-/// uses it implicitly).
+/// Default baseline-offset ratio (~32% of font size), matching
+/// `TextFont::from_size` and `layout_builder` defaults. Fed into
+/// [`row_metrics_with_baseline`] by [`row_metrics`].
 pub const DEFAULT_BASELINE_OFFSET_RATIO: f32 = 0.32;
 
-/// Row-anchor metrics for a single text view, snapshotted from
-/// `(viewport, scroll, font, baseline_offset)` so consumers can query
-/// many rows without re-deriving the constants.
+/// Snapshot of row-anchor constants for one text view. All output
+/// coords are in node-local logical px (top-left origin, +Y down).
 ///
-/// Construct via [`row_metrics`] (uses the canonical baseline ratio) or
-/// [`row_metrics_with_baseline`] (when you have a `DisplayLayout` and
-/// want byte-identical output to the renderer).
+/// Construct via [`row_metrics`] (canonical baseline ratio) or
+/// [`row_metrics_with_baseline`] (pass `DisplayLayout::baseline_offset`
+/// for byte-identical agreement with the renderer).
 #[derive(Clone, Copy, Debug)]
 pub struct RowMetrics {
-    /// World-space top of the viewport rectangle. Y inversion baseline.
-    pub world_top: f32,
-    /// World-space left of the viewport rectangle.
-    pub world_left: f32,
-    /// Engine-side `text_area_top + scroll_offset` — screen-space Y where
-    /// `display_row = 0` begins.
     text_area_top_with_scroll: f32,
-    /// Screen-space pixel offset for `text_area_left` (gutter + margin).
     text_area_left: f32,
-    /// Viewport content width in pixels. Used by `row_*_box` helpers for
-    /// viewport-spanning rects.
     viewport_width: f32,
-    /// Pixel width of one monospace cell (`TextFont.char_width`).
     char_width: f32,
-    /// Pixel height of a row's leaded box. Per-row overrides
-    /// (`ShapedLine.line_height`) are accepted via the `_with_height`
-    /// variants; this is the layout default.
     line_height: f32,
-    /// Engine-side `baseline_offset` — pixel distance from leaded-box
-    /// midline to the glyph baseline. Read from `DisplayLayout` when
-    /// possible; otherwise defaulted via [`DEFAULT_BASELINE_OFFSET_RATIO`].
     baseline_offset: f32,
-    /// Horizontal scroll, subtracted from `text_area_left` cells.
     horizontal_scroll: f32,
 }
 
-/// Snapshot the engine's row-anchor math for a text view, using the
-/// canonical baseline ratio (0.32). Cheap (a handful of float ops +
-/// struct copy).
-///
-/// If you have a `DisplayLayout` (you almost always do — it's a
-/// required component of `TextView`), prefer
-/// [`row_metrics_with_baseline`] passing `layout.baseline_offset` — that
-/// stays byte-identical with the renderer even when the layout
-/// customizes the baseline.
+/// Build a [`RowMetrics`] using the canonical baseline ratio.
+/// Prefer [`row_metrics_with_baseline`] passing `DisplayLayout::baseline_offset`
+/// when a layout is available.
 pub fn row_metrics(
     computed: &ComputedNode,
     scroll: &ScrollState,
@@ -138,8 +97,6 @@ pub fn row_metrics_with_baseline(
     let text_area_left = inset.min_inset.x * inv;
     let text_area_top = inset.min_inset.y * inv;
     RowMetrics {
-        world_top: logical.y / 2.0,
-        world_left: -logical.x / 2.0,
         text_area_top_with_scroll: text_area_top + scroll.scroll_offset,
         text_area_left,
         viewport_width: logical.x,
@@ -151,147 +108,95 @@ pub fn row_metrics_with_baseline(
 }
 
 impl RowMetrics {
-    /// Screen-space Y of `display_row`'s leaded-box top. Mirrors
-    /// `layout_builder::y_top_for`.
+    /// Y of `display_row`'s leaded-box top. Mirrors `layout_builder::y_top_for`.
     pub fn row_y_top(&self, display_row: u32) -> f32 {
         self.text_area_top_with_scroll + display_row as f32 * self.line_height
     }
 
-    /// World-space Y of the row's leaded-box top edge (highest point of
-    /// the row in screen-space; centered-ortho `+Y` is up, so this is a
-    /// larger value than the row's bottom).
-    pub fn row_world_y_top(&self, display_row: u32) -> f32 {
-        self.world_top - self.row_y_top(display_row)
-    }
-
-    /// World-space rectangle covering the row's full leaded box (the
-    /// entire `[y_top, y_top + line_height]` strip in screen-Y).
-    ///
-    /// The horizontal extent spans the viewport's content area
-    /// (`text_area_left` to `viewport.width`); narrow it yourself if you
-    /// only want a column subrange.
+    /// Rect covering the row's full leaded box, spanning the text area.
     pub fn row_full_box(&self, display_row: u32) -> Rect {
         self.row_full_box_with_height(display_row, self.line_height)
     }
 
-    /// As [`row_full_box`](Self::row_full_box) but with a per-row
-    /// `line_height` override (e.g. when a `ShapedLine` overrides the
-    /// layout default for headings).
+    /// [`row_full_box`](Self::row_full_box) with an explicit per-row
+    /// `line_height` override (e.g. for a shaped heading).
     pub fn row_full_box_with_height(&self, display_row: u32, line_height: f32) -> Rect {
-        let row_y_top = self.text_area_top_with_scroll + display_row as f32 * line_height;
-        let world_y_top = self.world_top - row_y_top;
+        let y_top = self.text_area_top_with_scroll + display_row as f32 * line_height;
         let content_width = self.row_content_width();
         Rect {
-            min: Vec2::new(
-                self.world_left + self.text_area_left,
-                world_y_top - line_height,
-            ),
-            max: Vec2::new(
-                self.world_left + self.text_area_left + content_width,
-                world_y_top,
-            ),
+            min: Vec2::new(self.text_area_left, y_top),
+            max: Vec2::new(self.text_area_left + content_width, y_top + line_height),
         }
     }
 
-    /// World-space rectangle covering only the visible glyph band of
-    /// `display_row` (cap-to-descender, not the full leaded box). This
-    /// is the band selection backgrounds, bracket boxes, and highlight
-    /// bars should align with — straddling the leaded box looks too
-    /// tall.
-    ///
-    /// Matches `RectOverlay { vertical: Full }`.
+    /// Rect covering the row's visible glyph band (cap-to-descender).
+    /// Matches `RectOverlay { vertical: Full }` — selection backgrounds,
+    /// bracket boxes, highlight bars should align here, not the full
+    /// leaded box (which looks too tall).
     pub fn row_glyph_band(&self, display_row: u32) -> Rect {
         self.row_glyph_band_with_height(display_row, self.line_height)
     }
 
-    /// Same as [`row_glyph_band`](Self::row_glyph_band) but lets the
-    /// caller pass a per-row `line_height` override.
+    /// [`row_glyph_band`](Self::row_glyph_band) with an explicit per-row
+    /// `line_height` override.
     pub fn row_glyph_band_with_height(&self, display_row: u32, line_height: f32) -> Rect {
-        // Mirror render::push_overlay_quad's RowVertical::Full math.
+        // Mirrors `render::push_overlay_quad`'s `RowVertical::Full` math.
         let baseline_y_off = line_height * 0.5 + self.baseline_offset;
         let cap = baseline_y_off + self.baseline_offset * 0.6;
         let band_top_y_off = baseline_y_off - cap * 0.25;
-        let row_y_top = self.text_area_top_with_scroll + display_row as f32 * line_height;
-        let world_y_top = self.world_top - row_y_top - band_top_y_off;
-        let world_y_bot = world_y_top - cap;
+        let y_top = self.text_area_top_with_scroll + display_row as f32 * line_height;
+        let band_top = y_top + band_top_y_off;
         let content_width = self.row_content_width();
         Rect {
-            min: Vec2::new(self.world_left + self.text_area_left, world_y_bot),
-            max: Vec2::new(
-                self.world_left + self.text_area_left + content_width,
-                world_y_top,
-            ),
+            min: Vec2::new(self.text_area_left, band_top),
+            max: Vec2::new(self.text_area_left + content_width, band_top + cap),
         }
     }
 
-    /// World-space top-left of the cell at `(display_row, column)`,
-    /// assuming a monospace grid (`char_width`-sized cells). For
-    /// proportional or shaped text use
-    /// [`cell_world_pos_at_x`](Self::cell_world_pos_at_x) with a pixel
-    /// x derived from the layout instead.
-    ///
-    /// "Top-left" here means the corner with the largest Y and smallest
-    /// X — i.e. the visual top-left as you'd expect from a screen-space
-    /// origin, mapped into centered-ortho world space. Anchored to the
-    /// row's leaded-box top; for glyph-band-aligned positioning use
-    /// [`cell_glyph_band_top_left`](Self::cell_glyph_band_top_left).
-    pub fn cell_world_pos(&self, display_row: u32, column: u32) -> Vec2 {
+    /// Top-left of the cell at `(display_row, column)` on a monospace
+    /// grid. For shaped text, pass a layout-derived pen-x to
+    /// [`cell_top_left_at_x`](Self::cell_top_left_at_x) instead.
+    pub fn cell_top_left(&self, display_row: u32, column: u32) -> Vec2 {
         let pixel_x = column as f32 * self.char_width;
-        self.cell_world_pos_at_x(display_row, pixel_x)
+        self.cell_top_left_at_x(display_row, pixel_x)
     }
 
-    /// World-space top-left of a cell whose horizontal pen-x (relative
-    /// to `text_area_left`, before horizontal-scroll subtraction) is
-    /// `pixel_x`. Use this for cells positioned by a `DisplayLayout`'s
-    /// shaped advances rather than a monospace grid.
-    pub fn cell_world_pos_at_x(&self, display_row: u32, pixel_x: f32) -> Vec2 {
+    /// Top-left of a cell at the given line-local pen-x (before horizontal scroll).
+    pub fn cell_top_left_at_x(&self, display_row: u32, pixel_x: f32) -> Vec2 {
         Vec2::new(
-            self.world_left + self.text_area_left + pixel_x - self.horizontal_scroll,
-            self.row_world_y_top(display_row),
+            self.text_area_left + pixel_x - self.horizontal_scroll,
+            self.row_y_top(display_row),
         )
     }
 
-    /// Top-left of the cell at `(display_row, column)` snapped to the
-    /// **glyph band** (not the leaded box). Useful when you want to
-    /// place a marker or rect that visually sits with the text rather
-    /// than the row's spacing.
+    /// Top-left of `(display_row, column)` snapped to the glyph band
+    /// instead of the leaded box — for markers that should sit with the
+    /// text rather than the row's spacing.
     pub fn cell_glyph_band_top_left(&self, display_row: u32, column: u32) -> Vec2 {
         let band = self.row_glyph_band(display_row);
         Vec2::new(
-            self.world_left + self.text_area_left + column as f32 * self.char_width
-                - self.horizontal_scroll,
-            band.max.y,
+            self.text_area_left + column as f32 * self.char_width - self.horizontal_scroll,
+            band.min.y,
         )
     }
 
-    /// Screen-space (top-down) Y of `display_row`'s glyph baseline.
-    /// Mirrors the renderer's
-    /// `line.y_top + line_height/2 + baseline_offset`. Useful for
-    /// consumers that emit glyph instances directly (e.g. the editor's
-    /// gutter line numbers, which paint into their own batch); pass the
-    /// returned value into the same world-Y conversion the renderer
-    /// uses (`world_top - screen_y - glyph.size.y`).
-    pub fn glyph_baseline_screen_y(&self, display_row: u32) -> f32 {
+    /// Y of `display_row`'s glyph baseline.
+    pub fn glyph_baseline_y(&self, display_row: u32) -> f32 {
         self.row_y_top(display_row) + self.line_height * 0.5 + self.baseline_offset
     }
 
-    /// World-space cell width in pixels (`char_width` in monospace
-    /// fonts). For proportional fonts the layout's per-glyph advances
-    /// should be used instead.
     pub fn cell_width(&self) -> f32 {
         self.char_width
     }
 
-    /// World-space row leaded-box height. Equals `font.line_height`
-    /// when no per-row override is in play.
     pub fn row_height(&self) -> f32 {
         self.line_height
     }
 
-    /// Width of the viewport's content area in pixels (`viewport.width
-    /// - text_area_left`). Used by `row_*_box` helpers that span the
-    /// viewport; consumers wanting a tighter fit should override
-    /// `rect.max.x` directly.
+    pub fn text_area_left(&self) -> f32 {
+        self.text_area_left
+    }
+
     fn row_content_width(&self) -> f32 {
         (self.viewport_width - self.text_area_left).max(0.0)
     }
@@ -312,11 +217,8 @@ impl RowMetrics {
 /// }
 /// ```
 ///
-/// Reads `Option<&DisplayLayout>` so consumers that haven't laid out
-/// yet still get sensible metrics (using the canonical baseline ratio).
-/// When the layout is present, its `baseline_offset` is used so the
-/// helper output stays byte-identical with the renderer even if the
-/// layout customizes the baseline.
+/// `DisplayLayout` is optional — without it, falls back to the canonical
+/// baseline ratio.
 #[derive(bevy::ecs::system::SystemParam)]
 pub struct RowMetricsParam<'w, 's> {
     query: bevy::ecs::system::Query<
@@ -335,9 +237,7 @@ pub struct RowMetricsParam<'w, 's> {
 }
 
 impl<'w, 's> RowMetricsParam<'w, 's> {
-    /// Build a `RowMetrics` snapshot for the given editor entity.
-    /// Returns `None` when the entity is missing a required component
-    /// (`ComputedNode`, `ScrollState`, `TextFont`, `LineHeight`, or `MonoCellWidth`).
+    /// `RowMetrics` for `entity`, or `None` if a required component is missing.
     pub fn get(&self, entity: bevy::ecs::entity::Entity) -> Option<RowMetrics> {
         let (_, computed, scroll, font, lh, mono, layout) = self.query.get(entity).ok()?;
         let line_height = crate::view::font::resolve_line_height(*lh, font.font_size);
@@ -347,10 +247,7 @@ impl<'w, 's> RowMetricsParam<'w, 's> {
         Some(row_metrics_with_baseline(computed, scroll, line_height, mono, baseline))
     }
 
-    /// As [`get`](Self::get) but `panic`s when the entity is missing
-    /// the required components. Useful for systems that have already
-    /// proven the entity is a valid editor (e.g. via a separate query
-    /// in the same system).
+    /// [`get`](Self::get) that panics on missing components.
     pub fn get_or_panic(&self, entity: bevy::ecs::entity::Entity) -> RowMetrics {
         self.get(entity).unwrap_or_else(|| {
             panic!(
@@ -361,9 +258,7 @@ impl<'w, 's> RowMetricsParam<'w, 's> {
         })
     }
 
-    /// Iterate over every text view in the world, yielding
-    /// `(entity, RowMetrics)` pairs. Useful for systems that operate
-    /// across multiple editors (e.g. a global indent-guide pass).
+    /// `(entity, RowMetrics)` for every text view in the world.
     pub fn iter(&self) -> impl Iterator<Item = (bevy::ecs::entity::Entity, RowMetrics)> + '_ {
         self.query
             .iter()
@@ -384,7 +279,6 @@ impl<'w, 's> RowMetricsParam<'w, 's> {
 mod tests {
     use super::*;
     use crate::view::overlay::{CornerRadii, RectOverlay, RowVertical};
-    use bevy::asset::Handle;
 
     fn make_metrics() -> RowMetrics {
         // 800x600 logical at 1x DPI; padding.left=50, padding.top=8.
@@ -404,7 +298,7 @@ mod tests {
         row_metrics_with_baseline(&computed, &scroll, 21.0, &mono, 14.0 * 0.32)
     }
 
-    /// `row_glyph_band`'s world-Y must agree with what
+    /// `row_glyph_band`'s Y bounds must agree with what
     /// `render::push_overlay_quad` computes for `RowVertical::Full`.
     /// If this drifts, every consumer's row-aligned decoration drifts
     /// off the engine's actual glyph band.
@@ -414,7 +308,7 @@ mod tests {
         let line_height = metrics.line_height;
         let baseline_offset = metrics.baseline_offset;
 
-        // Engine-side derivation copied verbatim from render.rs.
+        // Engine-side derivation copied verbatim from render.rs (top-left convention).
         let baseline_y_off = line_height * 0.5 + baseline_offset;
         let cap_to_descender = baseline_y_off + baseline_offset * 0.6;
         let text_band_above_baseline = cap_to_descender * 0.25;
@@ -423,22 +317,21 @@ mod tests {
 
         for display_row in [0u32, 1, 5, 12, 50] {
             let row_y_top = metrics.row_y_top(display_row);
-            let engine_world_y_center = metrics.world_top - row_y_top - y_off - height * 0.5;
-            let engine_world_y_top = engine_world_y_center + height * 0.5;
-            let engine_world_y_bot = engine_world_y_center - height * 0.5;
+            let engine_band_top = row_y_top + y_off;
+            let engine_band_bot = engine_band_top + height;
 
             let band = metrics.row_glyph_band(display_row);
             assert!(
-                (band.max.y - engine_world_y_top).abs() < 1e-3,
-                "row {display_row}: band.max.y {} != engine {}",
-                band.max.y,
-                engine_world_y_top,
-            );
-            assert!(
-                (band.min.y - engine_world_y_bot).abs() < 1e-3,
+                (band.min.y - engine_band_top).abs() < 1e-3,
                 "row {display_row}: band.min.y {} != engine {}",
                 band.min.y,
-                engine_world_y_bot,
+                engine_band_top,
+            );
+            assert!(
+                (band.max.y - engine_band_bot).abs() < 1e-3,
+                "row {display_row}: band.max.y {} != engine {}",
+                band.max.y,
+                engine_band_bot,
             );
         }
     }
@@ -452,23 +345,20 @@ mod tests {
 
         for display_row in [0u32, 1, 5, 12, 50] {
             let row_y_top = metrics.row_y_top(display_row);
-            let expected_world_y_top = metrics.world_top - row_y_top;
-            let expected_world_y_bot = expected_world_y_top - line_height;
-
             let r = metrics.row_full_box(display_row);
-            assert!((r.max.y - expected_world_y_top).abs() < 1e-3);
-            assert!((r.min.y - expected_world_y_bot).abs() < 1e-3);
+            assert!((r.min.y - row_y_top).abs() < 1e-3);
+            assert!((r.max.y - (row_y_top + line_height)).abs() < 1e-3);
         }
     }
 
     /// Cell positioning composes scroll + horizontal scroll + text-area
     /// padding the same way the renderer composes them for glyph quads.
     #[test]
-    fn cell_world_pos_composes_offsets() {
+    fn cell_top_left_composes_offsets() {
         let metrics = make_metrics();
-        let pos = metrics.cell_world_pos(3, 10);
-        let expected_x = metrics.world_left + metrics.text_area_left + 10.0 * metrics.char_width;
-        let expected_y = metrics.world_top - metrics.row_y_top(3);
+        let pos = metrics.cell_top_left(3, 10);
+        let expected_x = metrics.text_area_left + 10.0 * metrics.char_width;
+        let expected_y = metrics.row_y_top(3);
         assert!((pos.x - expected_x).abs() < 1e-3);
         assert!((pos.y - expected_y).abs() < 1e-3);
     }

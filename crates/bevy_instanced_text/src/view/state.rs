@@ -1,55 +1,138 @@
-//! Rope buffer + scroll state + content metrics for a scrollable text-rendering entity.
+//! TextContent trait, generic TextBuffer<T>, scroll state, and content metrics.
+
+use std::borrow::Cow;
+use std::ops::{Deref, DerefMut};
 
 use bevy::prelude::*;
-use ropey::Rope;
 
-/// Source-of-truth rope and cache-invalidation key. Mutators bump
-/// `content_version` so the display-map fingerprint can rebuild the layout.
-#[derive(Component, Reflect)]
-#[reflect(Component)]
-pub struct TextBuffer {
-    #[reflect(ignore)]
-    pub rope: Rope,
-
-    /// Bumped on every rope mutation; the display-map fingerprint reads this
-    /// to decide whether to rebuild the layout.
-    pub content_version: u64,
+/// Minimum interface the layout engine needs from a text buffer.
+///
+/// Implement this on any type to use it as the backing store for a
+/// [`TextBuffer`]. The engine calls only these three methods during
+/// layout — everything else (rope edits, cursor math, LSP position
+/// mapping) stays in the crate that owns the concrete type.
+///
+/// A built-in impl for [`String`] is provided so label / DAW / HUD use
+/// cases work without any extra dependencies.
+pub trait TextContent: Send + Sync + 'static {
+    /// Total number of lines, including a trailing empty line when the
+    /// content ends with `\n` (matching ropey's `len_lines()` convention).
+    fn line_count(&self) -> usize;
+    /// Text of line `i` (0-based), including its trailing `\n` if present.
+    fn line(&self, i: usize) -> Cow<'_, str>;
+    /// Character count of line `i`, excluding the trailing `\n`.
+    fn line_len_chars(&self, i: usize) -> usize;
 }
 
-impl Default for TextBuffer {
+/// A simple string-backed [`TextContent`] for labels, HUD values, DAW track
+/// names, and any other short text that doesn't need rope-level editing.
+///
+/// Mirrors Bevy's own `TextSpan(pub String)` naming convention. Spawning
+/// `TextBuffer::<TextSpan>::new(TextSpan::new("hello"))` is the simplest
+/// way to render instanced text.
+#[derive(Component, Clone, Default, Debug, Reflect)]
+#[reflect(Component, Default)]
+pub struct TextSpan(pub String);
+
+impl TextSpan {
+    pub fn new(text: impl Into<String>) -> Self {
+        Self(text.into())
+    }
+}
+
+impl TextContent for TextSpan {
+    fn line_count(&self) -> usize {
+        if self.0.is_empty() {
+            1
+        } else {
+            let n = self.0.lines().count();
+            if self.0.ends_with('\n') { n + 1 } else { n }
+        }
+    }
+
+    fn line(&self, i: usize) -> Cow<'_, str> {
+        let mut lines = self.0.split('\n');
+        Cow::Borrowed(lines.nth(i).unwrap_or(""))
+    }
+
+    fn line_len_chars(&self, i: usize) -> usize {
+        self.0.split('\n')
+            .nth(i)
+            .map(|l| l.chars().count())
+            .unwrap_or(0)
+    }
+}
+
+impl TextContent for String {
+    fn line_count(&self) -> usize {
+        if self.is_empty() {
+            1
+        } else {
+            let n = self.lines().count();
+            if self.ends_with('\n') { n + 1 } else { n }
+        }
+    }
+
+    fn line(&self, i: usize) -> Cow<'_, str> {
+        let mut lines = self.split('\n');
+        Cow::Borrowed(lines.nth(i).unwrap_or(""))
+    }
+
+    fn line_len_chars(&self, i: usize) -> usize {
+        self.split('\n')
+            .nth(i)
+            .map(|l| l.chars().count())
+            .unwrap_or(0)
+    }
+}
+
+/// The engine's text content component. Wraps any [`TextContent`] type.
+///
+/// Spawning this component (with a registered [`TextContentPlugin<T>`])
+/// is sufficient to get instanced text rendering. Change detection is
+/// handled by Bevy's standard `Changed<TextBuffer<T>>` — mutations go
+/// through [`DerefMut`] which marks the component changed automatically.
+///
+/// # Examples
+///
+/// ```rust,ignore
+/// // Simple label — no rope needed
+/// commands.spawn(TextBuffer::new("Track 1"));
+///
+/// // Editor — rope-backed, impl TextContent for Rope in your crate
+/// commands.spawn(TextBuffer::new(my_rope));
+/// ```
+#[derive(Component)]
+pub struct TextBuffer<T: TextContent>(pub T);
+
+impl<T: TextContent> TextBuffer<T> {
+    pub fn new(content: T) -> Self {
+        Self(content)
+    }
+}
+
+impl TextBuffer<String> {
+    pub fn from_str(s: &str) -> Self {
+        Self(s.to_owned())
+    }
+}
+
+impl<T: TextContent> Deref for TextBuffer<T> {
+    type Target = T;
+    fn deref(&self) -> &T {
+        &self.0
+    }
+}
+
+impl<T: TextContent> DerefMut for TextBuffer<T> {
+    fn deref_mut(&mut self) -> &mut T {
+        &mut self.0
+    }
+}
+
+impl<T: TextContent + Default> Default for TextBuffer<T> {
     fn default() -> Self {
-        Self {
-            rope: Rope::from_str(""),
-            content_version: 0,
-        }
-    }
-}
-
-impl TextBuffer {
-    pub fn new(text: &str) -> Self {
-        Self {
-            rope: Rope::from_str(text),
-            content_version: 1,
-        }
-    }
-
-    pub fn line_count(&self) -> usize {
-        self.rope.len_lines()
-    }
-
-    pub fn text(&self) -> String {
-        self.rope.to_string()
-    }
-
-    pub fn set_text(&mut self, text: &str) {
-        self.rope = Rope::from_str(text);
-        self.content_version += 1;
-    }
-
-    /// Bump `content_version` to force a layout rebuild on the next frame.
-    /// Use after any rope mutation that didn't go through `set_text`.
-    pub fn bump_version(&mut self) {
-        self.content_version += 1;
+        Self(T::default())
     }
 }
 

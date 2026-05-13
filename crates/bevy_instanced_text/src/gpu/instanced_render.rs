@@ -1,29 +1,14 @@
-//! GPU instanced text rendering.
+//! GPU instanced text rendering through Bevy's UI camera.
 //!
-//! Architecture: each `TextView` owns a "batch entity" carrying a
-//! `GlyphBatchComponent` (per-glyph instance buffer + atlas handle). A
-//! `SpecializedRenderPipeline` configures:
-//!
-//! - bind group 0 = `Mesh2dPipeline`'s view bind group (view-projection)
-//! - bind group 1 = atlas texture + sampler
-//! - vertex buffer 0 = per-instance glyph attributes (one entry per glyph)
-//!
-//! The vertex shader expands a unit quad from `vertex_index` per glyph and
-//! projects directly through `view.clip_from_world`. Glyph positions are
-//! emitted by `render_layout` in world-space pixels — the editor's camera
-//! positions itself so the panel's top-left sits at world (0, 0).
-//!
-//! Note: this pipeline does NOT integrate with `Mesh2dPipeline`'s per-mesh
-//! bind group (which would let entities have their own `Transform`). That
-//! integration uses `@builtin(instance_index)` to index into a per-entity
-//! transform array, which conflicts with our per-glyph instancing — every
-//! glyph would index a different entity slot. Skipping the per-mesh
-//! transform keeps the engine's instancing model intact at the cost of
-//! losing per-entity positioning.
+//! Bind groups: 0 = Bevy UI view (`SetUiViewBindGroup`), 1 = atlas,
+//! 2 = per-batch affine + clip rect. Glyph positions are node-local
+//! logical px; the shader composes per-batch affine and
+//! `view.clip_from_world` to land on the same screen pixels a Bevy
+//! `Text` node would.
 
 use bevy::{
-    core_pipeline::core_2d::{Transparent2d, CORE_2D_DEPTH_FORMAT},
     ecs::{
+        entity::EntityHashMap,
         query::QueryItem,
         system::{lifetimeless::*, SystemParamItem},
     },
@@ -38,42 +23,48 @@ use bevy::{
             RenderCommandResult, SetItemPipeline, TrackedRenderPass, ViewSortedRenderPhases,
         },
         render_resource::{
-            binding_types::*, BindGroup, BindGroupEntries, BindGroupLayoutDescriptor,
-            BindGroupLayoutEntries, BlendState, Buffer, BufferInitDescriptor, BufferUsages,
-            ColorTargetState, ColorWrites, CompareFunction, DepthBiasState, DepthStencilState,
+            binding_types::{sampler, texture_2d, uniform_buffer},
+            BindGroup, BindGroupEntries, BindGroupLayoutDescriptor, BindGroupLayoutEntries,
+            BlendState, Buffer, BufferInitDescriptor, BufferUsages, ColorTargetState, ColorWrites,
             FragmentState, MultisampleState, PipelineCache, PrimitiveState, PrimitiveTopology,
-            RenderPipelineDescriptor, SamplerBindingType, ShaderStages, SpecializedRenderPipeline,
-            SpecializedRenderPipelines, StencilFaceState, StencilState, TextureFormat,
+            RenderPipelineDescriptor, SamplerBindingType, ShaderStages, ShaderType,
+            SpecializedRenderPipeline, SpecializedRenderPipelines, TextureFormat,
             TextureSampleType, VertexAttribute, VertexFormat, VertexState, VertexStepMode,
+            DynamicUniformBuffer,
         },
-        renderer::RenderDevice,
-        sync_world::MainEntity,
+        renderer::{RenderDevice, RenderQueue},
+        sync_world::{MainEntity, RenderEntity},
         texture::GpuImage,
-        view::{ExtractedView, ViewTarget},
-        Render, RenderApp, RenderSystems,
+        view::{ExtractedView, ViewTarget, ViewUniform},
+        Extract, Render, RenderApp, RenderSystems,
     },
-    sprite_render::{Mesh2dPipeline, Mesh2dPipelineKey, SetMesh2dViewBindGroup},
+    ui_render::{stack_z_offsets, SetUiViewBindGroup, TransparentUi, UiCameraView},
 };
 
-use bevy_camera::visibility::RenderLayers;
+use crate::view::render::{BatchTransform, GlyphBatchComponent, GlyphInstance};
 
-use crate::view::render::{GlyphBatchComponent, GlyphInstance};
-
-/// Registers the GPU instanced text render pipeline: extracts `GlyphBatchComponent`
-/// to the render world and issues one instanced draw call per text view per frame.
+/// Registers the GPU instanced text render pipeline.
 pub struct InstancedTextRenderPlugin;
 
 impl Plugin for InstancedTextRenderPlugin {
     fn build(&self, app: &mut App) {
         bevy::asset::embedded_asset!(app, "text.wgsl");
 
-        app.add_plugins(ExtractComponentPlugin::<GlyphBatchComponent>::default());
+        app.add_plugins((
+            ExtractComponentPlugin::<GlyphBatchComponent>::default(),
+            ExtractComponentPlugin::<BatchTransform>::default(),
+        ));
 
         let render_app = app.sub_app_mut(RenderApp);
 
         render_app
-            .add_render_command::<Transparent2d, DrawInstancedText>()
+            .add_render_command::<TransparentUi, DrawInstancedText>()
             .init_resource::<SpecializedRenderPipelines<InstancedTextPipeline>>()
+            .init_resource::<BatchTransformUniforms>()
+            .add_systems(
+                bevy::render::ExtractSchedule,
+                extract_target_camera_render_entity,
+            )
             .add_systems(
                 Render,
                 (
@@ -81,7 +72,10 @@ impl Plugin for InstancedTextRenderPlugin {
                         .run_if(not(resource_exists::<InstancedTextPipeline>)),
                     queue_instanced_text
                         .run_if(resource_exists::<InstancedTextPipeline>)
-                        .in_set(RenderSystems::QueueMeshes),
+                        .in_set(RenderSystems::Queue),
+                    prepare_batch_transform_uniforms
+                        .run_if(resource_exists::<InstancedTextPipeline>)
+                        .in_set(RenderSystems::PrepareResources),
                     prepare_instance_buffers
                         .run_if(resource_exists::<InstancedTextPipeline>)
                         .in_set(RenderSystems::PrepareResources),
@@ -104,6 +98,40 @@ impl ExtractComponent for GlyphBatchComponent {
     }
 }
 
+impl ExtractComponent for BatchTransform {
+    type QueryData = &'static BatchTransform;
+    type QueryFilter = ();
+    type Out = Self;
+
+    fn extract_component(item: QueryItem<'_, '_, Self::QueryData>) -> Option<Self> {
+        Some(*item)
+    }
+}
+
+/// Translates each batch's main-world `target_camera` into the matching
+/// render-world entity, stored as [`ResolvedTargetCamera`] on the batch's
+/// render-world twin.
+fn extract_target_camera_render_entity(
+    mut commands: Commands,
+    batches: Extract<Query<(&BatchTransform, &RenderEntity)>>,
+    cam_render_entities: Extract<Query<&RenderEntity>>,
+) {
+    for (transform, batch_render) in batches.iter() {
+        let resolved = transform
+            .target_camera
+            .and_then(|cam| cam_render_entities.get(cam).ok().map(|r| r.id()));
+        if let Some(target) = resolved {
+            commands
+                .entity(batch_render.id())
+                .insert(ResolvedTargetCamera(target));
+        }
+    }
+}
+
+/// Render-world resolution of `BatchTransform::target_camera`.
+#[derive(Component, Clone, Copy)]
+pub struct ResolvedTargetCamera(pub Entity);
+
 #[derive(Component)]
 pub struct InstanceBuffer {
     pub buffer: Buffer,
@@ -113,6 +141,69 @@ pub struct InstanceBuffer {
 #[derive(Component)]
 pub struct TextureBindGroup {
     pub bind_group: BindGroup,
+}
+
+#[derive(Component)]
+pub struct BatchUniformBindGroup {
+    pub bind_group: BindGroup,
+    pub offset: u32,
+}
+
+/// GPU layout of `BatchTransform`. `clip_max.x < 0` signals no-clip.
+#[derive(Clone, Copy, ShaderType)]
+pub struct BatchUniform {
+    pub affine_row0: Vec3,
+    pub affine_row1: Vec3,
+    pub clip_min: Vec2,
+    pub clip_max: Vec2,
+}
+
+#[derive(Resource, Default)]
+pub struct BatchTransformUniforms {
+    pub buffer: DynamicUniformBuffer<BatchUniform>,
+}
+
+fn prepare_batch_transform_uniforms(
+    mut commands: Commands,
+    query: Query<(Entity, &BatchTransform)>,
+    render_device: Res<RenderDevice>,
+    render_queue: Res<RenderQueue>,
+    pipeline: Res<InstancedTextPipeline>,
+    pipeline_cache: Res<PipelineCache>,
+    mut uniforms: ResMut<BatchTransformUniforms>,
+) {
+    uniforms.buffer.clear();
+    let layout = pipeline_cache.get_bind_group_layout(&pipeline.batch_bind_group_layout);
+
+    let mut entries = Vec::new();
+    for (entity, transform) in &query {
+        let (clip_min, clip_max) = match transform.clip {
+            Some(rect) => (rect.min, rect.max),
+            None => (Vec2::ZERO, Vec2::new(-1.0, -1.0)),
+        };
+        let uniform = BatchUniform {
+            affine_row0: Vec3::new(transform.affine[0], transform.affine[1], transform.affine[2]),
+            affine_row1: Vec3::new(transform.affine[3], transform.affine[4], transform.affine[5]),
+            clip_min,
+            clip_max,
+        };
+        let offset = uniforms.buffer.push(&uniform);
+        entries.push((entity, offset));
+    }
+    uniforms.buffer.write_buffer(&render_device, &render_queue);
+
+    if let Some(uniform_binding) = uniforms.buffer.binding() {
+        for (entity, offset) in entries {
+            let bind_group = render_device.create_bind_group(
+                "batch_transform_bind_group",
+                &layout,
+                &BindGroupEntries::single(uniform_binding.clone()),
+            );
+            commands
+                .entity(entity)
+                .insert(BatchUniformBindGroup { bind_group, offset });
+        }
+    }
 }
 
 fn prepare_instance_buffers(
@@ -158,22 +249,25 @@ fn prepare_instance_buffers(
 
 #[derive(Resource, Clone)]
 pub struct InstancedTextPipeline {
-    view_layout: BindGroupLayoutDescriptor,
-    shader: Handle<Shader>,
-    atlas_bind_group_layout: BindGroupLayoutDescriptor,
+    pub view_layout: BindGroupLayoutDescriptor,
+    pub atlas_bind_group_layout: BindGroupLayoutDescriptor,
+    pub batch_bind_group_layout: BindGroupLayoutDescriptor,
+    pub shader: Handle<Shader>,
 }
 
-fn init_instanced_text_pipeline(
-    mut commands: Commands,
-    asset_server: Res<AssetServer>,
-    mesh2d_pipeline: Option<Res<Mesh2dPipeline>>,
-) {
-    let Some(mesh2d_pipeline) = mesh2d_pipeline else {
-        return;
-    };
+fn init_instanced_text_pipeline(mut commands: Commands, asset_server: Res<AssetServer>) {
+    // Single-binding ViewUniform layout, matching Bevy UI's view layout so
+    // `SetUiViewBindGroup<0>` can bind into it directly.
+    let view_layout = BindGroupLayoutDescriptor::new(
+        "instanced_text_view_layout",
+        &BindGroupLayoutEntries::single(
+            ShaderStages::VERTEX_FRAGMENT,
+            uniform_buffer::<ViewUniform>(true),
+        ),
+    );
 
     let atlas_bind_group_layout = BindGroupLayoutDescriptor::new(
-        "text_atlas_layout",
+        "instanced_text_atlas_layout",
         &BindGroupLayoutEntries::sequential(
             ShaderStages::FRAGMENT,
             (
@@ -183,77 +277,52 @@ fn init_instanced_text_pipeline(
         ),
     );
 
+    let batch_bind_group_layout = BindGroupLayoutDescriptor::new(
+        "instanced_text_batch_layout",
+        &BindGroupLayoutEntries::single(
+            ShaderStages::VERTEX_FRAGMENT,
+            uniform_buffer::<BatchUniform>(true),
+        ),
+    );
+
     let shader = bevy::asset::load_embedded_asset!(asset_server.as_ref(), "text.wgsl");
 
     commands.insert_resource(InstancedTextPipeline {
-        view_layout: mesh2d_pipeline.view_layout.clone(),
-        shader,
+        view_layout,
         atlas_bind_group_layout,
+        batch_bind_group_layout,
+        shader,
     });
 }
 
+#[derive(Clone, Copy, Hash, PartialEq, Eq)]
+pub struct InstancedTextPipelineKey {
+    pub hdr: bool,
+    pub msaa_samples: u32,
+}
+
 impl SpecializedRenderPipeline for InstancedTextPipeline {
-    type Key = Mesh2dPipelineKey;
+    type Key = InstancedTextPipelineKey;
 
     fn specialize(&self, key: Self::Key) -> RenderPipelineDescriptor {
-        // Buffer 0: per-glyph instance attributes. Locations 0..=7 match
-        // the field order of `GlyphInstance` in `view::render`.
+        // Per-glyph instance attributes; locations match `GlyphInstance`'s
+        // field order in `view::render`.
         let instance_layout = VertexBufferLayout {
             array_stride: std::mem::size_of::<GlyphInstance>() as u64,
             step_mode: VertexStepMode::Instance,
             attributes: vec![
-                // position (vec2)
-                VertexAttribute {
-                    format: VertexFormat::Float32x2,
-                    offset: 0,
-                    shader_location: 0,
-                },
-                // uv_min (vec2)
-                VertexAttribute {
-                    format: VertexFormat::Float32x2,
-                    offset: 8,
-                    shader_location: 1,
-                },
-                // uv_max (vec2)
-                VertexAttribute {
-                    format: VertexFormat::Float32x2,
-                    offset: 16,
-                    shader_location: 2,
-                },
-                // size (vec2)
-                VertexAttribute {
-                    format: VertexFormat::Float32x2,
-                    offset: 24,
-                    shader_location: 3,
-                },
-                // color (vec4)
-                VertexAttribute {
-                    format: VertexFormat::Float32x4,
-                    offset: 32,
-                    shader_location: 4,
-                },
-                // corner_radii (vec4)
-                VertexAttribute {
-                    format: VertexFormat::Float32x4,
-                    offset: 48,
-                    shader_location: 5,
-                },
-                // z_index (f32)
-                VertexAttribute {
-                    format: VertexFormat::Float32,
-                    offset: 64,
-                    shader_location: 6,
-                },
-                // skew (f32)
-                VertexAttribute {
-                    format: VertexFormat::Float32,
-                    offset: 68,
-                    shader_location: 7,
-                },
+                VertexAttribute { format: VertexFormat::Float32x2, offset: 0,  shader_location: 0 },
+                VertexAttribute { format: VertexFormat::Float32x2, offset: 8,  shader_location: 1 },
+                VertexAttribute { format: VertexFormat::Float32x2, offset: 16, shader_location: 2 },
+                VertexAttribute { format: VertexFormat::Float32x2, offset: 24, shader_location: 3 },
+                VertexAttribute { format: VertexFormat::Float32x4, offset: 32, shader_location: 4 },
+                VertexAttribute { format: VertexFormat::Float32x4, offset: 48, shader_location: 5 },
+                VertexAttribute { format: VertexFormat::Float32,    offset: 64, shader_location: 6 },
+                VertexAttribute { format: VertexFormat::Float32,    offset: 68, shader_location: 7 },
             ],
         };
 
-        let format = if key.contains(Mesh2dPipelineKey::HDR) {
+        let format = if key.hdr {
             ViewTarget::TEXTURE_FORMAT_HDR
         } else {
             TextureFormat::bevy_default()
@@ -272,37 +341,24 @@ impl SpecializedRenderPipeline for InstancedTextPipeline {
                 entry_point: Some("fragment".into()),
                 targets: vec![Some(ColorTargetState {
                     format,
-                    blend: Some(BlendState::PREMULTIPLIED_ALPHA_BLENDING),
+                    blend: Some(BlendState::ALPHA_BLENDING),
                     write_mask: ColorWrites::ALL,
                 })],
             }),
             layout: vec![
                 self.view_layout.clone(),
                 self.atlas_bind_group_layout.clone(),
+                self.batch_bind_group_layout.clone(),
             ],
             primitive: PrimitiveState {
                 topology: PrimitiveTopology::TriangleList,
                 cull_mode: None,
                 ..default()
             },
-            depth_stencil: Some(DepthStencilState {
-                format: CORE_2D_DEPTH_FORMAT,
-                depth_write_enabled: false,
-                depth_compare: CompareFunction::GreaterEqual,
-                stencil: StencilState {
-                    front: StencilFaceState::IGNORE,
-                    back: StencilFaceState::IGNORE,
-                    read_mask: 0,
-                    write_mask: 0,
-                },
-                bias: DepthBiasState {
-                    constant: 0,
-                    slope_scale: 0.0,
-                    clamp: 0.0,
-                },
-            }),
+            // UI pass uses no depth attachment (see `UiPassNode::run`).
+            depth_stencil: None,
             multisample: MultisampleState {
-                count: key.msaa_samples(),
+                count: key.msaa_samples,
                 mask: !0,
                 alpha_to_coverage_enabled: false,
             },
@@ -315,55 +371,89 @@ impl SpecializedRenderPipeline for InstancedTextPipeline {
 
 #[allow(clippy::too_many_arguments)]
 fn queue_instanced_text(
-    transparent_2d_draw_functions: Res<DrawFunctions<Transparent2d>>,
+    transparent_ui_draw_functions: Res<DrawFunctions<TransparentUi>>,
     instanced_text_pipeline: Res<InstancedTextPipeline>,
     mut pipelines: ResMut<SpecializedRenderPipelines<InstancedTextPipeline>>,
     pipeline_cache: Res<PipelineCache>,
     batches: Query<(
         Entity,
         &MainEntity,
-        Option<&GlobalTransform>,
         &GlyphBatchComponent,
+        &BatchTransform,
+        Option<&ResolvedTargetCamera>,
     )>,
-    mut transparent_render_phases: ResMut<ViewSortedRenderPhases<Transparent2d>>,
-    views: Query<(Entity, &ExtractedView, &Msaa, Option<&RenderLayers>)>,
+    mut transparent_render_phases: ResMut<ViewSortedRenderPhases<TransparentUi>>,
+    main_views: Query<(Entity, &UiCameraView)>,
+    ui_views: Query<&ExtractedView>,
 ) {
-    let draw_function = transparent_2d_draw_functions
+    let draw_function = transparent_ui_draw_functions
         .read()
         .id::<DrawInstancedText>();
 
-    for (_view_entity, view, msaa, view_layers) in &views {
-        let Some(transparent_phase) = transparent_render_phases.get_mut(&view.retained_view_entity)
-        else {
+    let ui_view_keys: Vec<bevy::render::view::RetainedViewEntity> =
+        transparent_render_phases.keys().copied().collect();
+
+    let mut by_main_camera: EntityHashMap<(
+        bevy::render::view::RetainedViewEntity,
+        bool,
+    )> = EntityHashMap::default();
+    for (main_render_entity, ui_camera_view) in &main_views {
+        if let Ok(view) = ui_views.get(ui_camera_view.0) {
+            by_main_camera.insert(
+                main_render_entity,
+                (view.retained_view_entity, view.hdr),
+            );
+        }
+    }
+
+    // Archetype-timing fallback for the first few frames before the main
+    // camera's `UiCameraView` is visible to our query: target every UI
+    // view that has a `TransparentUi` phase. Single-camera apps (the common
+    // case) route to the only available view; multi-camera apps overshoot
+    // for a frame or two, then converge.
+    let fallback_views: Vec<(bevy::render::view::RetainedViewEntity, bool)> = if by_main_camera.is_empty() {
+        ui_views
+            .iter()
+            .map(|view| (view.retained_view_entity, view.hdr))
+            .filter(|(rve, _)| ui_view_keys.contains(rve))
+            .collect()
+    } else {
+        Vec::new()
+    };
+
+    for (entity, main_entity, batch, transform, resolved_cam) in &batches {
+        if batch.instances.is_empty() {
             continue;
-        };
+        }
 
-        let view_render_layers = view_layers.cloned().unwrap_or_default();
+        let routes: Vec<(bevy::render::view::RetainedViewEntity, bool)> =
+            match resolved_cam.and_then(|c| by_main_camera.get(&c.0).copied()) {
+                Some(route) => vec![route],
+                None => fallback_views.clone(),
+            };
 
-        let view_key = Mesh2dPipelineKey::from_msaa_samples(msaa.samples())
-            | Mesh2dPipelineKey::from_hdr(view.hdr);
+        for (retained_view, hdr) in routes {
+            let Some(transparent_phase) = transparent_render_phases.get_mut(&retained_view) else {
+                continue;
+            };
 
-        let pipeline_id = pipelines.specialize(&pipeline_cache, &instanced_text_pipeline, view_key);
+            // UI pass is MSAA=1 (see `UiPassNode::run`).
+            let pipeline_id = pipelines.specialize(
+                &pipeline_cache,
+                &instanced_text_pipeline,
+                InstancedTextPipelineKey { hdr, msaa_samples: 1 },
+            );
 
-        for (entity, main_entity, global_transform, batch) in &batches {
-            // Filter by render layer.
-            if let Some(layer) = batch.render_layer {
-                let batch_layers = RenderLayers::layer(layer as usize);
-                if !view_render_layers.intersects(&batch_layers) {
-                    continue;
-                }
-            }
+            let sort = transform.stack_index as f32 + stack_z_offsets::TEXT;
 
-            let z = global_transform.map(|t| t.translation().z).unwrap_or(0.0);
-
-            transparent_phase.add(Transparent2d {
+            transparent_phase.add(TransparentUi {
                 entity: (entity, *main_entity),
                 pipeline: pipeline_id,
                 draw_function,
-                sort_key: FloatOrd(z),
+                sort_key: FloatOrd(sort),
                 batch_range: 0..1,
                 extra_index: PhaseItemExtraIndex::None,
-                extracted_index: usize::MAX,
+                index: usize::MAX,
                 indexed: false,
             });
         }
@@ -372,8 +462,9 @@ fn queue_instanced_text(
 
 type DrawInstancedText = (
     SetItemPipeline,
-    SetMesh2dViewBindGroup<0>,
+    SetUiViewBindGroup<0>,
     SetAtlasBindGroup<1>,
+    SetBatchUniformBindGroup<2>,
     DrawTextInstanced,
 );
 
@@ -399,6 +490,28 @@ impl<P: PhaseItem, const I: usize> RenderCommand<P> for SetAtlasBindGroup<I> {
     }
 }
 
+struct SetBatchUniformBindGroup<const I: usize>;
+
+impl<P: PhaseItem, const I: usize> RenderCommand<P> for SetBatchUniformBindGroup<I> {
+    type Param = ();
+    type ViewQuery = ();
+    type ItemQuery = Read<BatchUniformBindGroup>;
+
+    fn render<'w>(
+        _item: &P,
+        _view: (),
+        batch_bind_group: Option<&'w BatchUniformBindGroup>,
+        _param: SystemParamItem<'w, '_, Self::Param>,
+        pass: &mut TrackedRenderPass<'w>,
+    ) -> RenderCommandResult {
+        let Some(bg) = batch_bind_group else {
+            return RenderCommandResult::Skip;
+        };
+        pass.set_bind_group(I, &bg.bind_group, &[bg.offset]);
+        RenderCommandResult::Success
+    }
+}
+
 struct DrawTextInstanced;
 
 impl<P: PhaseItem> RenderCommand<P> for DrawTextInstanced {
@@ -420,9 +533,8 @@ impl<P: PhaseItem> RenderCommand<P> for DrawTextInstanced {
             return RenderCommandResult::Skip;
         }
 
-        // The shader expands a unit quad from `vertex_index`, six vertices
-        // per glyph via the triangle-list `0,1,2, 3,4,5` winding mapped
-        // onto BL,BR,TL, TL,BR,TR.
+        // 6 vertices per glyph — the shader expands a unit quad from
+        // `vertex_index`, no mesh asset is bound.
         pass.set_vertex_buffer(0, instance_buffer.buffer.slice(..));
         pass.draw(0..6, 0..instance_buffer.length as u32);
 

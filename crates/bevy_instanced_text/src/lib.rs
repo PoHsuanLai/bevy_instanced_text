@@ -7,14 +7,17 @@
 //!
 //! ## Concepts
 //!
-//! A **[`TextView`]** entity is a standard Bevy UI `Node`. Size it with
-//! `Node::width`/`height`; add `Node::padding` to inset the text area from
-//! the node edges. Everything else is standard Bevy UI — hit-testing, picking,
-//! and layout are all handled by the UI system automatically.
+//! A text view entity is a standard Bevy UI `Node` carrying a [`TextBuffer<T>`].
+//! Size it with `Node::width`/`height`; add `Node::padding` to inset the text
+//! area from the node edges. Everything else is standard Bevy UI — hit-testing,
+//! picking, and layout are all handled by the UI system automatically.
 //!
-//! Pair `TextView` with:
+//! The content type `T` is anything that implements [`TextContent`]. The crate
+//! ships [`TextSpan`] (a `String` wrapper) for simple labels; editors plug in a
+//! rope-backed type and terminals plug in a grid-derived type.
 //!
-//! - **[`TextBuffer`]** — the rope-backed text content and a version counter.
+//! Components paired with [`TextBuffer<T>`]:
+//!
 //! - **[`TextFont`]** — font path, size, and line height.
 //! - **[`TextColor`]** / **[`TextBackgroundColor`]** — foreground and background colors.
 //! - **[`LineStyles`]** — per-line [`StyleRun`] lists (colors, bold, italic,
@@ -67,7 +70,7 @@
 //!
 //! // Left text view — sized to half the window in logical pixels.
 //! commands.spawn((
-//!     bevy_instanced_text::TextView,
+//!     bevy_instanced_text::TextBuffer::new(bevy_instanced_text::TextSpan::new("left pane")),
 //!     Node { width: Val::Px(window.width() / 2.0), height: Val::Px(window.height()), ..default() },
 //!     RenderLayers::layer(0),
 //! ));
@@ -79,6 +82,7 @@
 //! ```rust,no_run
 //! use bevy::prelude::*;
 //! use bevy_instanced_text::prelude::*;
+//! use bevy_instanced_text::TextSpan; // disambiguate from `bevy::text::TextSpan`
 //!
 //! App::new()
 //!     .add_plugins(DefaultPlugins)
@@ -88,13 +92,12 @@
 //!         commands.spawn(Camera2d);
 //!         // Text view — size it with Node; padding insets the text area.
 //!         commands.spawn((
-//!             TextView,
+//!             TextBuffer::new(TextSpan::new("hello world")),
 //!             Node {
 //!                 width: Val::Vw(100.0),
 //!                 height: Val::Vh(100.0),
 //!                 ..default()
 //!             },
-//!             TextBuffer::new("hello world"),
 //!             TextFont::default(),
 //!         ));
 //!     })
@@ -111,10 +114,10 @@ pub mod prelude {
     //! Common types for spawning and rendering text views.
     pub use crate::gpu::{GlyphAtlasPlugin, InstancedTextRenderPlugin};
     pub use crate::view::{
-        row_metrics, row_metrics_with_baseline, AnchorPoint, BufferAnchorParam, ContentMetrics,
-        CornerRadii, DisplayLayout, FontSynthesis, HiddenLines, InstancedTextPlugin,
-        InstancedTextPlugins, LineStyles, MonoCellWidth, MonoFontFaces, RectOverlay, RowMetrics,
-        RowMetricsParam, RowVertical, RunWithText, ScrollState, StyleRun, TextBackgroundColor,
-        TextBounds, TextBuffer, TextColor, TextView, TextViewOverlays,
+        row_metrics, row_metrics_with_baseline, ContentMetrics, CornerRadii, DisplayLayout,
+        FontSynthesis, HiddenLines, InstancedTextPlugin, InstancedTextPlugins, LineStyles,
+        MonoCellWidth, MonoFontFaces, RectOverlay, RowMetrics, RowMetricsParam, RowVertical,
+        RunWithText, ScrollState, StyleRun, TextBackgroundColor, TextBounds, TextBuffer,
+        TextColor, TextContent, TextContentPlugin, TextSpan, TextViewOverlays,
     };
 }

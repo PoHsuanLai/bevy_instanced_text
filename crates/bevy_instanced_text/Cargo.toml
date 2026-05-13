@@ -15,8 +15,6 @@ bevy = { version = "0.18", default-features = false, features = [
     "bevy_render",
     "bevy_core_pipeline",
     "bevy_asset",
-    "bevy_sprite",
-    "bevy_sprite_render",
     "bevy_color",
     "bevy_mesh",
     "bevy_camera",
@@ -24,10 +22,10 @@ bevy = { version = "0.18", default-features = false, features = [
     "bevy_picking",
     "bevy_text",
     "bevy_ui",
+    "bevy_ui_render",
 ] }
 bevy_camera = "0.18"
 
-ropey = "1.6"
 bitflags = "2"
 cosmic-text = "0.12"
 swash = "0.1"

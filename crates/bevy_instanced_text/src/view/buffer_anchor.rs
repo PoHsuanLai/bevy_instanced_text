@@ -1,64 +1,32 @@
-//! Buffer-position → screen / world anchoring.
+//! Buffer-position → node-local logical px anchoring.
 //!
 //! [`BufferAnchorParam`] is the higher-level companion to
-//! [`crate::RowMetricsParam`]: where `RowMetrics` answers
-//! *"given a display row + pixel x, where on screen is that?"*,
-//! `BufferAnchor` answers *"given a buffer line + character (or rope
-//! char-offset), where on screen is that?"* It folds in the editor's
-//! `TextBuffer` and `DisplayLayout` so consumers don't have to repeat
-//! the buffer→display→pixel resolution chain — and so the LSP-flavored
-//! `(line, character)` and the rope-flavored `char_index` paths produce
-//! consistent results.
+//! [`crate::RowMetricsParam`]: it folds in the editor's `TextBuffer`
+//! and `DisplayLayout` so LSP-flavored `(line, character)` and
+//! rope-flavored `char_index` lookups land on the same screen pixel.
 //!
-//! Two conversions live in here:
+//! Buffer→display row honors soft-wrap and folding via
+//! [`DisplayLayout::buffer_to_display`] when a layout is present, else
+//! a 1:1 mapping. Pixel-x uses [`DisplayLayout::x_at_byte`] with a
+//! monospace fallback (`character * char_width`).
 //!
-//! 1. **Buffer → display row.** When a layout is present, this honors
-//!    soft-wrap and folding via [`DisplayLayout::buffer_to_display`];
-//!    otherwise it falls back to a 1:1 buffer-line → display-row
-//!    mapping (correct for unwrapped, unfolded views).
-//! 2. **Pixel x.** Layout-aware via [`DisplayLayout::x_at_byte`] (uses
-//!    cosmic-text's actual advances) or monospace fallback
-//!    (`character * char_width`). Monospace is a fine default for
-//!    code-editor workloads where every glyph is one cell wide.
-//!
-//! The output [`AnchorPoint`] carries every flavor of coordinate a
-//! consumer plausibly needs:
-//!
-//! - `screen_top_left` — top-down pixel coords relative to the editor
-//!   panel's origin. egui popups want this. Hosts add their panel's own
-//!   offset.
-//! - `world_top_left`, `world_band_center`, `world_baseline` —
-//!   centered-ortho world space, for sprite-anchored UI on the same
-//!   camera as the engine.
-//! - `display_row`, `pixel_x_screen` — the underlying engine
-//!   coordinates, in case a consumer wants to push their own
-//!   `RectOverlay` or compose with `RowMetrics`.
-//! - `on_screen` — whether the anchor falls inside the editor's
-//!   viewport rectangle (popups can use this to hide rather than
-//!   render off-edge).
-//!
-//! # Example — egui popup
+//! # Example — UI-node popup
 //!
 //! ```ignore
 //! fn render_completion(
-//!     mut contexts: EguiContexts,
+//!     mut commands: Commands,
 //!     anchors: BufferAnchorParam,
 //!     popups: Query<(Entity, &CompletionPopupData)>,
 //! ) {
 //!     for (editor, popup) in popups.iter() {
 //!         let anchor = anchors.at_buffer_pos(editor, popup.line, popup.character);
-//!         let pos = egui::pos2(anchor.screen_top_left.x, anchor.screen_below.y);
-//!         // ...
+//!         commands.entity(popup_entity).insert(Node {
+//!             position_type: PositionType::Absolute,
+//!             left: Val::Px(anchor.below_left.x),
+//!             top: Val::Px(anchor.below_left.y),
+//!             ..default()
+//!         });
 //!     }
-//! }
-//! ```
-//!
-//! # Example — sprite-anchored UI
-//!
-//! ```ignore
-//! fn render_my_widget(anchors: BufferAnchorParam, editor: Single<Entity, With<MyEditor>>) {
-//!     let anchor = anchors.at_buffer_pos(*editor, line, character);
-//!     // commands.spawn(Sprite { ... }, Transform::from_translation(anchor.world_band_center.extend(5.0)));
 //! }
 //! ```
 
@@ -74,59 +42,40 @@ use super::layout::DisplayLayout;
 use super::state::{ScrollState, TextBuffer};
 use bevy::text::TextFont;
 
-/// Resolved screen / world coordinates for a buffer position.
+/// Resolved coordinates for a buffer position, in node-local logical
+/// pixels (top-left origin, +Y down) — the same space `Node::top` /
+/// `Node::left` consume and the same space `render_layout` emits glyph
+/// positions in.
 ///
 /// Every flavor a consumer plausibly needs is materialized once at
 /// query time so callers don't pick the wrong combination of
-/// `RowMetrics` / `viewport_offset` / horizontal-scroll. Numeric cost:
-/// half a dozen multiplies and adds — far cheaper than the cache miss
-/// from re-fetching components per call site.
+/// `RowMetrics` / horizontal-scroll. Numeric cost: half a dozen
+/// multiplies and adds — far cheaper than the cache miss from
+/// re-fetching components per call site.
 #[derive(Clone, Copy, Debug)]
 pub struct AnchorPoint {
-    /// 0-indexed display row the buffer position resolves to (post
-    /// soft-wrap and folding when a `DisplayLayout` is attached).
+    /// Display row, post soft-wrap and folding when a layout is present.
     pub display_row: u32,
-    /// Pen-x within the row in pixels, line-local — does not include
-    /// `text_area_left` or horizontal scroll.
+    /// Line-local pen-x (no `text_area_left`, no horizontal scroll).
     pub pixel_x: f32,
-    /// Top-down screen-space top-left corner of the cell, relative to
-    /// the editor entity's viewport origin (top-left of the editor
-    /// panel = `(0, 0)`). The host adds its own panel offset.
-    pub screen_top_left: Vec2,
-    /// Top-down screen-space bottom-left of the cell — i.e.
-    /// `screen_top_left + (0, line_height)`. egui popups that want to
-    /// flip below the cursor anchor here.
-    pub screen_below_left: Vec2,
-    /// Centered-ortho world-space top-left of the cell. Sprite-anchored
-    /// UI placed on the engine's `Camera2d` uses this directly.
-    pub world_top_left: Vec2,
-    /// Centered-ortho world-space midpoint of the row's glyph band
-    /// (cap-to-descender). Sprites anchored here visually sit *with*
-    /// the text rather than straddling the leaded box.
-    pub world_band_center: Vec2,
-    /// Centered-ortho world-space glyph-baseline point at this column
-    /// (X = `world_top_left.x`, Y = baseline). Useful for placing
-    /// underline-like decorations or text rendered through some other
-    /// pipeline that already aligns to baseline.
-    pub world_baseline: Vec2,
-    /// Row leaded-box height in pixels (matches `font.line_height`
-    /// unless a per-row override is in play).
+    /// Cell's leaded-box top-left.
+    pub top_left: Vec2,
+    /// `top_left + (0, line_height)`. Popups flipping below the cursor
+    /// anchor here.
+    pub below_left: Vec2,
+    /// Glyph-band midpoint — for decorations that should sit *with* the
+    /// text rather than straddling the leaded box.
+    pub band_center: Vec2,
+    /// Glyph baseline at this column.
+    pub baseline: Vec2,
     pub line_height: f32,
-    /// `true` when the anchor's `(screen_top_left)` falls inside the
-    /// editor's viewport rectangle. Consumers rendering into a
-    /// non-clipped layer (egui overlay) can use this to hide popups
-    /// scrolled out of view rather than draw off-edge.
+    /// `top_left` lies within the visible viewport.
     pub on_screen: bool,
 }
 
-/// `SystemParam` shorthand: take any number of editor entities and
-/// resolve `(line, character)` or rope `char_index` to an
-/// [`AnchorPoint`] for a given editor.
-///
-/// Composes a `RowMetrics` snapshot with the entity's `TextBuffer` and
-/// optional `DisplayLayout`, so layout-aware (soft-wrapped, folded)
-/// editors resolve correctly while trivial/un-laid-out editors still
-/// get a sensible monospace fallback.
+/// `SystemParam` resolving `(line, character)` or rope `char_index` to
+/// an [`AnchorPoint`]. Falls back to monospace pixel-x when no layout
+/// is attached.
 type BufferAnchorQuery<'w, 's> = Query<
     'w,
     's,
@@ -148,19 +97,11 @@ pub struct BufferAnchorParam<'w, 's> {
 }
 
 impl<'w, 's> BufferAnchorParam<'w, 's> {
-    /// Anchor a buffer `(line, character)` (LSP-flavored) on the given
-    /// editor entity.
+    /// Anchor a buffer `(line, character)` on `entity`.
     ///
-    /// `character` is treated as a **byte offset within the line** when
-    /// a `DisplayLayout` is attached (so cosmic-text's shaped advances
-    /// resolve the pen-x), and as a monospace cell index otherwise.
-    /// LSP servers report UTF-16 code units; for ASCII code (the common
-    /// case) the two coincide. Non-ASCII positions need a separate
-    /// UTF-16→byte conversion before calling here.
-    ///
-    /// Returns `None` only when the entity is missing a required
-    /// component (`ComputedNode`, `ScrollState`, `TextFont`,
-    /// `TextBuffer`).
+    /// `character` is a byte offset within the line when a layout is
+    /// attached, or a monospace cell index otherwise. LSP servers
+    /// report UTF-16 code units; convert before calling for non-ASCII.
     pub fn at_buffer_pos(&self, entity: Entity, line: u32, character: u32) -> Option<AnchorPoint> {
         let (_, computed, scroll, font, lh, mono, _buffer, layout) = self.query.get(entity).ok()?;
         let line_height = crate::view::font::resolve_line_height(*lh, font.font_size);
@@ -204,35 +145,29 @@ impl<'w, 's> BufferAnchorParam<'w, 's> {
     ) -> AnchorPoint {
         let inv = computed.inverse_scale_factor();
         let logical = computed.size() * inv;
-        let text_area_left = computed.content_inset().min_inset.x * inv;
 
-        let screen_x = text_area_left + pixel_x - scroll.horizontal_scroll_offset;
-        let screen_y = metrics.row_y_top(display_row);
-
-        let screen_top_left = Vec2::new(screen_x, screen_y);
-        let screen_below_left = Vec2::new(screen_x, screen_y + line_height);
-
-        let world_top_left = metrics.cell_world_pos_at_x(display_row, pixel_x);
+        let top_left = metrics.cell_top_left_at_x(display_row, pixel_x);
+        let below_left = Vec2::new(top_left.x, top_left.y + line_height);
         let band = metrics.row_glyph_band(display_row);
-        let world_band_center = Vec2::new(world_top_left.x, (band.min.y + band.max.y) * 0.5);
-        let world_baseline = Vec2::new(
-            world_top_left.x,
-            metrics.world_top - metrics.glyph_baseline_screen_y(display_row),
-        );
+        let band_center = Vec2::new(top_left.x, (band.min.y + band.max.y) * 0.5);
+        let baseline = Vec2::new(top_left.x, metrics.glyph_baseline_y(display_row));
 
-        let on_screen = screen_x >= 0.0
-            && screen_y >= 0.0
-            && screen_x < logical.x
-            && screen_y + line_height <= logical.y;
+        let on_screen = top_left.x >= 0.0
+            && top_left.y >= 0.0
+            && top_left.x < logical.x
+            && top_left.y + line_height <= logical.y;
+
+        // `scroll`/`computed` are read indirectly via `metrics`.
+        let _ = scroll;
+        let _ = computed;
 
         AnchorPoint {
             display_row,
             pixel_x,
-            screen_top_left,
-            screen_below_left,
-            world_top_left,
-            world_band_center,
-            world_baseline,
+            top_left,
+            below_left,
+            band_center,
+            baseline,
             line_height,
             on_screen,
         }
@@ -330,8 +265,7 @@ mod tests {
             .unwrap();
         assert_eq!(a.display_row, b.display_row);
         assert!((a.pixel_x - b.pixel_x).abs() < 1e-3);
-        assert!((a.screen_top_left - b.screen_top_left).length() < 1e-3);
-        assert!((a.world_top_left - b.world_top_left).length() < 1e-3);
+        assert!((a.top_left - b.top_left).length() < 1e-3);
     }
 
     /// Without a `DisplayLayout` (or with one whose
@@ -361,11 +295,11 @@ mod tests {
         assert!((anchor.pixel_x - 5.0 * 8.4).abs() < 1e-3);
     }
 
-    /// The screen-space anchor the helper produces must match the
-    /// math `cursor_screen_pos` did manually before this API existed —
+    /// The anchor the helper produces must match the math
+    /// `cursor_screen_pos` did manually before this API existed —
     /// otherwise migrating callers shifts their popups.
     #[test]
-    fn screen_pos_matches_legacy_cursor_screen_pos() {
+    fn top_left_matches_legacy_cursor_screen_pos() {
         let (mut world, entity) = make_editor_world();
         let anchor = world
             .run_system_once(move |anchors: BufferAnchorParam| {
@@ -373,7 +307,8 @@ mod tests {
             })
             .unwrap();
 
-        // Legacy formula from examples/editor_lsp.rs::cursor_screen_pos.
+        // Legacy formula from examples/editor_lsp.rs::cursor_screen_pos
+        // — now lives entirely in `RowMetrics::cell_top_left_at_x`.
         let computed = make_computed();
         let scroll = ScrollState {
             scroll_offset: -100.0,
@@ -384,20 +319,17 @@ mod tests {
         };
         let mono = MonoCellWidth { px: 8.4 };
         let metrics = super::row_metrics_with_baseline(&computed, &scroll, 21.0, &mono, 14.0 * 0.32);
-        let text_area_left = computed.content_inset().min_inset.x * computed.inverse_scale_factor();
-        let expected_screen_x =
-            text_area_left + 3.0 * mono.px - scroll.horizontal_scroll_offset;
-        let expected_screen_y = metrics.row_y_top(1);
+        let expected = metrics.cell_top_left_at_x(1, 3.0 * mono.px);
 
-        assert!((anchor.screen_top_left.x - expected_screen_x).abs() < 1e-3);
-        assert!((anchor.screen_top_left.y - expected_screen_y).abs() < 1e-3);
+        assert!((anchor.top_left.x - expected.x).abs() < 1e-3);
+        assert!((anchor.top_left.y - expected.y).abs() < 1e-3);
     }
 
-    /// The world-space anchor the helper produces must match
-    /// `RowMetrics::cell_world_pos_at_x` — the helper is a convenience
+    /// The anchor the helper produces must match
+    /// `RowMetrics::cell_top_left_at_x` — the helper is a convenience
     /// wrapper, not a parallel code path.
     #[test]
-    fn world_pos_matches_row_metrics() {
+    fn top_left_matches_row_metrics() {
         let (mut world, entity) = make_editor_world();
         let anchor = world
             .run_system_once(move |anchors: BufferAnchorParam| {
@@ -415,8 +347,8 @@ mod tests {
         };
         let mono = MonoCellWidth { px: 8.4 };
         let metrics = super::row_metrics_with_baseline(&computed, &scroll, 21.0, &mono, 14.0 * 0.32);
-        let expected = metrics.cell_world_pos_at_x(2, 4.0 * mono.px);
+        let expected = metrics.cell_top_left_at_x(2, 4.0 * mono.px);
 
-        assert!((anchor.world_top_left - expected).length() < 1e-3);
+        assert!((anchor.top_left - expected).length() < 1e-3);
     }
 }

@@ -1,22 +1,24 @@
 //! Text view plugin — registers the rendering and scroll animation systems
-//! that turn `TextView` entities into GPU draw batches.
+//! that turn `TextBuffer<T>` entities into GPU draw batches.
 //!
-//! This module also defines [`InstancedTextPlugins`], a [`PluginGroup`] that
-//! bundles the GPU plugins from [`crate::gpu`] together with the view-side
-//! [`InstancedTextPlugin`]. Hosts that just want "render styled text" should
-//! add `InstancedTextPlugins`; those that already manage the GPU pipeline
-//! themselves can add [`InstancedTextPlugin`] alone.
+//! [`InstancedTextPlugin`] sets up the core rendering infrastructure.
+//! [`TextContentPlugin<T>`] registers `produce_layouts::<T>` for a specific
+//! content type — add one per `T` you use. [`InstancedTextPlugins`] bundles
+//! everything including the `String` content type for simple labels.
+
+use std::marker::PhantomData;
 
 use bevy::app::{PluginGroup, PluginGroupBuilder};
 use bevy::prelude::*;
-use bevy::ui::{ComputedNode, IsDefaultUiCamera, UiSystems};
+use bevy::math::Affine2;
+use bevy::ui::{ui_transform::UiGlobalTransform, CalculatedClip, ComputedNode, ComputedUiTargetCamera, IsDefaultUiCamera, UiSystems};
 
 use super::font::{MonoCellWidth, MonoFontFaces};
 use super::layout::DisplayLayout;
 use super::layout_builder::{produce_layouts, LayoutProduceSet};
 use super::overlay::TextViewOverlays;
-use super::render::{render_layout, GlyphBatchComponent, TextViewBatch};
-use super::state::{CompositeStops, ContentMetrics, ScrollAnimation, ScrollState, TextBuffer};
+use super::render::{render_layout, BatchTransform, GlyphBatchComponent, TextViewBatch};
+use super::state::{CompositeStops, ContentMetrics, ScrollAnimation, ScrollState, TextBuffer, TextContent};
 use super::styling::TextBounds;
 use super::theme::{TextBackgroundColor, TextColor};
 use super::tuning::LayoutTuning;
@@ -26,50 +28,86 @@ use crate::gpu::{atlas_ready, GlyphAtlas, GlyphAtlasPlugin, InstancedTextRenderP
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct TextViewRenderSet;
 
-/// Marker for a text view rendered by [`InstancedTextPlugin`]. `#[require]`
-/// cascades the rest of the rendering machinery — spawning `TextView` alone
-/// is enough. Includes `Pickable` so `bevy_instanced_text_edit::picking` can produce
-/// `PointerHits` without the engine needing to register the backend itself.
-#[derive(Component, Default, Reflect)]
-#[reflect(Component, Default)]
-#[require(
-    TextBuffer,
-    ScrollState,
-    ContentMetrics,
-    DisplayLayout,
-    TextViewOverlays,
-    TextFont,
-    MonoFontFaces,
-    MonoCellWidth,
-    TextBounds,
-    LayoutTuning,
-    Node,
-    Transform,
-    Visibility,
-    bevy::picking::Pickable
-)]
-pub struct TextView;
-
 /// Links a text view to its batch rendering entity. Managed by `update_text_views`.
 #[derive(Component, Reflect)]
 #[reflect(Component)]
 pub struct TextViewBatchEntity(pub Entity);
 
-/// Registers the rendering and scroll animation systems. Does not add GPU
+/// Registers `produce_layouts::<T>` for a specific [`TextContent`] type.
+///
+/// Add one of these per content type you use. [`InstancedTextPlugin`]
+/// automatically adds `TextContentPlugin::<String>` for the simple label
+/// use case. Editor / terminal hosts add their own (e.g.
+/// `TextContentPlugin::<Rope>`).
+pub struct TextContentPlugin<T: TextContent + Component>(PhantomData<T>);
+
+impl<T: TextContent + Component> Default for TextContentPlugin<T> {
+    fn default() -> Self {
+        Self(PhantomData)
+    }
+}
+
+impl<T: TextContent + Component> Plugin for TextContentPlugin<T> {
+    fn build(&self, app: &mut App) {
+        // Register required components so spawning TextBuffer<T> alone is enough.
+        app.world_mut()
+            .register_required_components_with::<TextBuffer<T>, bevy::text::LineHeight>(|| {
+                bevy::text::LineHeight::RelativeToFont(1.5)
+            });
+        app.world_mut()
+            .register_required_components::<TextBuffer<T>, ScrollState>();
+        app.world_mut()
+            .register_required_components::<TextBuffer<T>, ContentMetrics>();
+        app.world_mut()
+            .register_required_components::<TextBuffer<T>, DisplayLayout>();
+        app.world_mut()
+            .register_required_components::<TextBuffer<T>, TextViewOverlays>();
+        app.world_mut()
+            .register_required_components::<TextBuffer<T>, TextFont>();
+        app.world_mut()
+            .register_required_components::<TextBuffer<T>, MonoFontFaces>();
+        app.world_mut()
+            .register_required_components::<TextBuffer<T>, MonoCellWidth>();
+        app.world_mut()
+            .register_required_components::<TextBuffer<T>, bevy::text::TextLayout>();
+        app.world_mut()
+            .register_required_components::<TextBuffer<T>, TextBounds>();
+        app.world_mut()
+            .register_required_components::<TextBuffer<T>, super::styling::LineStyles>();
+        app.world_mut()
+            .register_required_components::<TextBuffer<T>, super::styling::HiddenLines>();
+        app.world_mut()
+            .register_required_components::<TextBuffer<T>, LayoutTuning>();
+        app.world_mut()
+            .register_required_components::<TextBuffer<T>, Node>();
+        app.world_mut()
+            .register_required_components::<TextBuffer<T>, Transform>();
+        app.world_mut()
+            .register_required_components::<TextBuffer<T>, Visibility>();
+        app.world_mut()
+            .register_required_components::<TextBuffer<T>, bevy::picking::Pickable>();
+
+        app.add_systems(
+            PostUpdate,
+            produce_layouts::<T>
+                .run_if(atlas_ready)
+                .in_set(LayoutProduceSet)
+                .after(UiSystems::Layout)
+                .before(prewarm_atlas_for_layout),
+        );
+    }
+}
+
+/// Registers the core rendering and scroll animation systems. Does not add GPU
 /// plugins — use [`InstancedTextPlugins`] for the full bundle.
+///
+/// Also registers [`TextContentPlugin::<String>`] for simple label use cases.
 #[derive(Default)]
 pub struct InstancedTextPlugin;
 
 impl Plugin for InstancedTextPlugin {
     fn build(&self, app: &mut App) {
         app.register_type::<LayoutTuning>();
-
-        // Override LineHeight's default (1.2×) with the monospace standard (1.5×)
-        // so hosts that spawn TextView without an explicit LineHeight get the right spacing.
-        app.world_mut()
-            .register_required_components_with::<TextView, bevy::text::LineHeight>(|| {
-                bevy::text::LineHeight::RelativeToFont(1.5)
-            });
 
         app.register_type::<MonoFontFaces>()
             .register_type::<MonoCellWidth>()
@@ -78,30 +116,24 @@ impl Plugin for InstancedTextPlugin {
             .register_type::<TextBounds>()
             .register_type::<TextColor>()
             .register_type::<TextBackgroundColor>()
-            .register_type::<TextView>()
             .register_type::<TextViewBatchEntity>()
             .register_type::<TextViewOverlays>()
-            .register_type::<TextBuffer>()
             .register_type::<ScrollState>()
-            .register_type::<ContentMetrics>()
-            ;
+            .register_type::<ContentMetrics>();
+
+        app.register_type::<super::state::TextSpan>();
+        // Register the TextSpan content type so simple labels work out of the box.
+        app.add_plugins(TextContentPlugin::<super::state::TextSpan>::default());
 
         app.add_systems(Update, animate_text_view_scroll);
 
         // Ensure there is always a camera marked as the default UI camera so
-        // Bevy UI layout can resolve Val::Percent sizes for TextView Node entities.
-        // Runs in PostStartup so all Startup camera-spawning systems have completed.
-        // Hosts that want a specific camera can add IsDefaultUiCamera themselves.
+        // Bevy UI layout can resolve Val::Percent sizes for TextBuffer<T> Node entities.
         app.add_systems(PostStartup, ensure_default_ui_camera);
 
         app.add_systems(
             PostUpdate,
             (
-                produce_layouts
-                    .run_if(atlas_ready)
-                    .in_set(LayoutProduceSet)
-                    .after(UiSystems::Layout)
-                    .before(prewarm_atlas_for_layout),
                 prewarm_atlas_for_layout
                     .run_if(atlas_ready)
                     .before(update_text_views),
@@ -189,7 +221,7 @@ fn build_animation(from: f32, to: f32, duration: f32, viewport_size: f32) -> Scr
 }
 
 fn animate_text_view_scroll(
-    mut query: Query<(&mut ScrollState, &ComputedNode), With<TextView>>,
+    mut query: Query<(&mut ScrollState, &ComputedNode), With<DisplayLayout>>,
     time: Res<Time>,
 ) {
     let dt = time.delta_secs();
@@ -307,21 +339,25 @@ pub fn update_text_views(
             Entity,
             &ScrollState,
             &ComputedNode,
+            &UiGlobalTransform,
+            Option<&CalculatedClip>,
+            Option<&ComputedUiTargetCamera>,
             &TextFont,
             &MonoFontFaces,
+            &bevy::text::TextLayout,
             Ref<DisplayLayout>,
             Option<Ref<TextViewOverlays>>,
             Option<&TextViewBatchEntity>,
             Option<&bevy_camera::visibility::RenderLayers>,
         ),
-        With<TextView>,
+        With<DisplayLayout>,
     >,
     mut atlas: ResMut<GlyphAtlas>,
     mut images: ResMut<Assets<Image>>,
     fonts: Res<Assets<bevy::text::Font>>,
 ) {
     let _span = bevy::prelude::info_span!("update_text_views").entered();
-    for (tv_entity, scroll, computed, font, faces_cfg, layout, overlays, batch_entity_opt, render_layers) in
+    for (tv_entity, scroll, computed, ui_transform, clip, target_cam, font, faces_cfg, text_layout, layout, overlays, batch_entity_opt, render_layers) in
         text_views.iter_mut()
     {
         let regular = atlas.ensure_font(&font.font, &fonts);
@@ -351,10 +387,30 @@ pub fn update_text_views(
         }
         let layout: &DisplayLayout = &layout;
         let overlays = overlays.as_deref();
-        // text_area_left = padding.left from ComputedNode (set by host via Node::padding).
-        // gutter_width is host-managed and always <= text_area_left, so content_start_x = text_area_left.
         let inv = computed.inverse_scale_factor();
-        let content_start_x = computed.content_inset().min_inset.x * inv;
+        let inset = computed.content_inset();
+        let content_start_x = inset.min_inset.x * inv;
+        let content_end_inset_x = inset.max_inset.x * inv;
+
+        // `UiGlobalTransform` is anchored at the node's center (in
+        // screen physical px), so map top-left logical px → center
+        // physical px before applying it. Mirrors Bevy UI's text-extract
+        // `Affine2::from(*transform) * Affine2::from_translation(-0.5 * size)`.
+        let scale = 1.0 / inv;
+        let size_phys = computed.size();
+        let ui_affine: Affine2 = **ui_transform;
+        let composed = ui_affine
+            * Affine2::from_translation(-0.5 * size_phys)
+            * Affine2::from_scale(Vec2::splat(scale));
+        let batch_transform = BatchTransform {
+            affine: [
+                composed.matrix2.x_axis.x, composed.matrix2.y_axis.x, composed.translation.x,
+                composed.matrix2.x_axis.y, composed.matrix2.y_axis.y, composed.translation.y,
+            ],
+            clip: clip.map(|c| c.clip),
+            stack_index: computed.stack_index,
+            target_camera: target_cam.and_then(|c| c.get()),
+        };
 
         let instances = {
             let _render_span = bevy::prelude::info_span!("render_layout").entered();
@@ -366,9 +422,11 @@ pub fn update_text_views(
                 &fonts,
                 super::render::RenderContext {
                     content_start_x,
+                    content_end_inset_x,
                     horizontal_scroll_offset: scroll.horizontal_scroll_offset,
                     font_size: font.font_size,
                     faces,
+                    justify: text_layout.justify,
                 },
             )
         };
@@ -413,6 +471,7 @@ pub fn update_text_views(
         if let Some(batch_e) = batch_entity_opt {
             let mut cmds = commands.entity(batch_e.0);
             cmds.insert(batch_comp)
+                .insert(batch_transform)
                 .insert(Visibility::Visible)
                 .insert(batch_data);
             if let Some(layers) = render_layers {
@@ -421,8 +480,7 @@ pub fn update_text_views(
         } else {
             let mut entity_cmds = commands.spawn((
                 batch_comp,
-                Transform::default(),
-                GlobalTransform::default(),
+                batch_transform,
                 batch_data,
                 Name::new("TextViewBatch"),
                 Visibility::Visible,
@@ -460,7 +518,7 @@ fn ensure_default_ui_camera(
 /// Pre-rasterize every glyph in a freshly-built `DisplayLayout` so the renderer
 /// never triggers atlas mutation during the paint pass (eliminates scroll stutter).
 pub(crate) fn prewarm_atlas_for_layout(
-    layouts: Query<Ref<DisplayLayout>, With<TextView>>,
+    layouts: Query<Ref<DisplayLayout>>,
     mut atlas: ResMut<GlyphAtlas>,
 ) {
     for layout in &layouts {

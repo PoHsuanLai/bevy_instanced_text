@@ -92,7 +92,7 @@ fn run_is_bold(run: &StyleRun) -> bool {
     matches!(run.font_weight, Some(w) if w >= 600)
 }
 
-/// Glyph instance data for GPU rendering.
+/// Glyph instance data for GPU rendering. `pub` for test inspection in downstream crates.
 ///
 /// `corner_radii` carries per-corner radii `[tl, tr, bl, br]`. Background
 /// rects use this for asymmetric rounding (e.g. multi-row code-block
@@ -139,11 +139,31 @@ pub struct GlyphBatchComponent {
     pub render_layer: Option<u8>,
 }
 
+/// Per-batch affine + clip + UI camera routing for one `TextView`.
+///
+/// The affine maps node-local logical px → screen physical px and is
+/// composed each frame in [`update_text_views`]. `clip` mirrors Bevy UI's
+/// `CalculatedClip`. `stack_index` and `target_camera` mirror
+/// `ComputedNode::stack_index` / `ComputedUiTargetCamera` on the
+/// `TextView`.
+#[derive(Component, Clone, Copy, Debug)]
+pub struct BatchTransform {
+    /// 2×3 affine, row-major: `[m00, m01, t0, m10, m11, t1]`.
+    pub affine: [f32; 6],
+    pub clip: Option<Rect>,
+    pub stack_index: u32,
+    pub target_camera: Option<Entity>,
+}
+
 pub struct RenderContext {
     pub content_start_x: f32,
+    /// Padding-right inset (in logical px); used by `Justify::Right`/`Center`
+    /// to stop before the right padding boundary.
+    pub content_end_inset_x: f32,
     pub horizontal_scroll_offset: f32,
     pub font_size: f32,
     pub faces: FontFaces,
+    pub justify: bevy::text::Justify,
 }
 
 /// Render a `DisplayLayout` into glyph instances. Pure function over an immutable
@@ -159,23 +179,22 @@ pub fn render_layout(
 ) -> Vec<GlyphInstance> {
     let RenderContext {
         content_start_x,
+        content_end_inset_x,
         horizontal_scroll_offset,
         font_size,
         faces,
+        justify,
     } = ctx;
     let default_line_height = layout.line_height;
     let char_width = layout.char_width;
     let baseline_offset = layout.baseline_offset;
 
-    // Glyph instances are emitted in world-space pixels under the
-    // centered-ortho convention: viewport's top-left is at
-    // `(-width/2, +height/2)` relative to the camera origin. The shader
-    // projects directly through the camera's `view.clip_from_world`.
+    // Emit in node-local logical px, top-left origin, +Y down — the
+    // shader composes with the per-batch affine to land on screen px.
     let inv = viewport.inverse_scale_factor();
     let logical = viewport.size() * inv;
-    let viewport_world_left = -logical.x / 2.0;
-    let viewport_world_top = logical.y / 2.0;
-    let line_start_x = content_start_x - horizontal_scroll_offset;
+    let content_width = logical.x - content_start_x - content_end_inset_x;
+    let base_line_start_x = content_start_x - horizontal_scroll_offset;
 
     // Single anchor: `line.y_top` is the row's visual top in screen pixels.
     //   - Glyph baseline = y_top + line_height/2 + baseline_offset (legacy ascent ratio).
@@ -194,9 +213,7 @@ pub fn render_layout(
             push_overlay_quad(
                 rect,
                 layout,
-                viewport_world_left,
-                viewport_world_top,
-                line_start_x,
+                base_line_start_x,
                 logical.x,
                 atlas.solid_uv,
                 &mut below_instances,
@@ -209,7 +226,17 @@ pub fn render_layout(
         let line_height = line.line_height.unwrap_or(default_line_height);
         // Glyph baseline derived from row top.
         let base_y = line.y_top + line_height * 0.5 + baseline_offset;
-        let line_x = line_start_x + line.x_offset;
+        let line_width = line.shape.as_ref().map_or(
+            line.text.len() as f32 * char_width,
+            |s| s.width,
+        );
+        let justify_offset = match justify {
+            bevy::text::Justify::Left => 0.0,
+            bevy::text::Justify::Center => (content_width - line_width).max(0.0) * 0.5,
+            bevy::text::Justify::Right => (content_width - line_width).max(0.0),
+            bevy::text::Justify::Justified => 0.0, // word spacing not supported; treat as left
+        };
+        let line_x = base_line_start_x + line.x_offset + justify_offset;
 
         // Line background (full-width quad) — full row, top-anchored on y_top.
         if let Some(bg) = line.line_bg {
@@ -227,10 +254,12 @@ pub fn render_layout(
                 .filter(|r| r.bg == Some(bg))
                 .map(|r| r.corner_radius)
                 .fold(0.0_f32, f32::max);
+            // Centered on `line.y_top` — preserves legacy anchoring; the
+            // half-row vertical offset is a latent bug tracked separately.
             below_instances.push(GlyphInstance {
                 position: Vec2::new(
-                    viewport_world_left + margin + bg_x_start,
-                    viewport_world_top - line.y_top - line_height * 0.5,
+                    margin + bg_x_start,
+                    line.y_top - line_height * 0.5,
                 ),
                 uv_min: atlas.solid_uv.uv_min,
                 uv_max: atlas.solid_uv.uv_max,
@@ -247,12 +276,7 @@ pub fn render_layout(
         }
 
         // Pre-compose the row anchor; threads through every emitter call.
-        let anchor = RowAnchor {
-            viewport_world_left,
-            viewport_world_top,
-            line_x,
-            base_y,
-        };
+        let anchor = RowAnchor { line_x, base_y };
 
         // Shape-driven path is used when the line carries a `LineShape` shaped
         // at this font_size, no run wants a font_scale override, and no run
@@ -424,9 +448,7 @@ pub fn render_layout(
             push_overlay_quad(
                 rect,
                 layout,
-                viewport_world_left,
-                viewport_world_top,
-                line_start_x,
+                base_line_start_x,
                 logical.x,
                 atlas.solid_uv,
                 &mut above_instances,
@@ -448,18 +470,13 @@ fn line_byte_to_x(line: &ShapedLine, byte: usize, char_width: f32) -> f32 {
     line_x_at_byte(line, byte, char_width)
 }
 
-/// Where a row paints — viewport origin + line-local offsets. Composed once
-/// per row in `render_layout` and threaded into both glyph emitters and quad
-/// pushers, eliminating repeated 4-float parameter lists.
+/// Where a row paints in node-local logical px. Threaded through the
+/// glyph and quad emitters so they share one anchor.
 #[derive(Clone, Copy)]
 struct RowAnchor {
-    /// Viewport's world-space top-left X (Bevy's center-origin Y is inverted).
-    viewport_world_left: f32,
-    /// Viewport's world-space top edge (Y inversion baseline).
-    viewport_world_top: f32,
-    /// Line-local origin X in screen pixels, includes scroll + line.x_offset.
+    /// Pen origin X, already including `text_area_left + scroll + line.x_offset`.
     line_x: f32,
-    /// Glyph baseline Y in screen pixels (top-down origin).
+    /// Glyph baseline Y.
     base_y: f32,
 }
 
@@ -473,21 +490,18 @@ struct RunStyle {
     stroke_offset_px: f32,
 }
 
-/// Build a glyph quad from an atlas hit. Centralizes the legacy/shaped paint
-/// math so both emitters share one expression for screen→world conversion.
+/// Build a glyph quad from an atlas hit. Emits the glyph's top-left
+/// corner in node-local logical pixels (+Y down).
 fn glyph_quad(
     info: crate::gpu::GlyphInfo,
     pen_x: f32,
     anchor: RowAnchor,
     style: RunStyle,
 ) -> GlyphInstance {
-    let screen_x = anchor.line_x + pen_x + info.offset.x;
-    let screen_y = anchor.base_y - info.offset.y;
+    let node_x = anchor.line_x + pen_x + info.offset.x;
+    let node_y = anchor.base_y - info.offset.y;
     GlyphInstance {
-        position: Vec2::new(
-            anchor.viewport_world_left + screen_x,
-            anchor.viewport_world_top - screen_y - info.size.y,
-        ),
+        position: Vec2::new(node_x, node_y),
         uv_min: info.uv_min,
         uv_max: info.uv_max,
         size: info.size,
@@ -611,10 +625,11 @@ fn emit_run_with_bg(
     let text_band_above = cap_to_descender * 0.25;
     let band_top_y_off = baseline_y_off - text_band_above;
     let bg_w = (seg_x_end - seg_x_start).max(0.0);
+    // Spans the glyph band, matching `RectOverlay { vertical: Full }`.
     below.push(GlyphInstance {
         position: Vec2::new(
-            anchor.viewport_world_left + anchor.line_x + seg_x_start,
-            anchor.viewport_world_top - line.y_top - band_top_y_off - cap_to_descender * 0.5,
+            anchor.line_x + seg_x_start,
+            line.y_top + band_top_y_off - cap_to_descender * 0.5,
         ),
         uv_min: atlas.solid_uv.uv_min,
         uv_max: atlas.solid_uv.uv_max,
@@ -691,8 +706,6 @@ fn emit_run_glyphs_only(
 fn push_overlay_quad(
     rect: &super::overlay::RectOverlay,
     layout: &DisplayLayout,
-    world_left: f32,
-    world_top: f32,
     line_start_x: f32,
     viewport_width: f32,
     solid_uv: crate::gpu::GlyphInfo,
@@ -711,9 +724,7 @@ fn push_overlay_quad(
     // render to the left of the block's own indent (e.g. blockquote bars).
     let x0 = rect.x_range.start;
     let x1 = if rect.x_range.end >= f32::MAX / 2.0 {
-        // Sentinel: extend to the viewport's right edge.
-        // world_x_right == world_left + viewport_width
-        // world_x_right == world_left + line_start_x + line.x_offset + x1
+        // Sentinel: stretch to the viewport's right edge.
         (viewport_width - line_start_x - line.x_offset).max(x0 + 1.0)
     } else {
         rect.x_range.end
@@ -774,13 +785,13 @@ fn push_overlay_quad(
         }
     };
 
-    let world_x = world_left + line_start_x + line.x_offset + x0;
-    // Single anchor: line.y_top is the row's screen-Y top. Quad position is the
-    // *center* of the rect; world_top inverts Y.
-    let world_y = world_top - line.y_top - y_off - height * 0.5;
+    let node_x = line_start_x + line.x_offset + x0;
+    // Centered on `line.y_top + y_off` — preserves legacy overlay
+    // anchoring; the half-height offset is a latent bug tracked separately.
+    let node_y = line.y_top + y_off - height * 0.5;
 
     out.push(GlyphInstance {
-        position: Vec2::new(world_x, world_y),
+        position: Vec2::new(node_x, node_y),
         uv_min: solid_uv.uv_min,
         uv_max: solid_uv.uv_max,
         size: Vec2::new(width, height),
@@ -823,7 +834,7 @@ fn emit_run_decoration(
     let color = linear_rgba(fg);
     let width = (x_end - x_start).max(1.0);
     // anchor.line_x already includes line_start_x + line.x_offset.
-    let world_x = anchor.viewport_world_left + anchor.line_x + x_start;
+    let node_x = anchor.line_x + x_start;
 
     // Derive y_top from base_y: base_y = y_top + line_height*0.5 + baseline_offset
     let y_top = anchor.base_y - line_height * 0.5 - baseline_offset;
@@ -831,9 +842,9 @@ fn emit_run_decoration(
     let cap_to_descender = baseline_y_off + baseline_offset * 0.6;
 
     let mut push = |y_off: f32| {
-        let world_y = anchor.viewport_world_top - y_top - y_off - thickness;
+        let node_y = y_top + y_off;
         out.push(GlyphInstance {
-            position: Vec2::new(world_x, world_y),
+            position: Vec2::new(node_x, node_y),
             uv_min: solid_uv.uv_min,
             uv_max: solid_uv.uv_max,
             size: Vec2::new(width, thickness),
