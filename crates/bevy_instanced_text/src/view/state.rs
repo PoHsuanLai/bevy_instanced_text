@@ -136,38 +136,36 @@ impl<T: TextContent + Default> Default for TextBuffer<T> {
     }
 }
 
-/// Vertical and horizontal scroll offsets and their smooth-scroll targets.
-#[derive(Component, Reflect)]
-#[reflect(Component)]
-pub struct ScrollState {
-    pub scroll_offset: f32,
-    pub target_scroll_offset: f32,
-    pub horizontal_scroll_offset: f32,
-    pub target_horizontal_scroll_offset: f32,
+/// Smooth-scroll animation targets and current horizontal offset.
+///
+/// Hosts write `target_y` / `target_x` to request scroll; the engine's
+/// `animate_text_view_scroll` system drives `bevy::ui::ScrollPosition.y`
+/// (vertical) and `horizontal` (horizontal) toward those targets each frame.
+///
+/// For instant (non-animated) scroll, write both
+/// `bevy::ui::ScrollPosition.y` and `target_y` to the same value.
+///
+/// Sign convention: positive = down / right (Bevy-native).
+#[derive(Component, Default, Reflect)]
+#[reflect(Component, Default)]
+pub struct SmoothScroll {
+    /// Vertical smooth-scroll target in logical pixels, positive = down.
+    pub target_y: f32,
+    /// Horizontal smooth-scroll target in logical pixels, positive = right.
+    pub target_x: f32,
+    /// Current animated horizontal offset. Written by the engine; read by
+    /// renderers. Not the same as `target_x` when an animation is in flight.
+    pub horizontal: f32,
     /// Animation duration in seconds. Synced from `ScrollConfig::smooth_scroll_duration`.
-    pub smooth_scroll_duration: f32,
+    pub duration: f32,
     #[reflect(ignore)]
-    pub vertical_anim: Option<ScrollAnimation>,
+    pub(crate) vertical_anim: Option<ScrollAnimation>,
     #[reflect(ignore)]
-    pub horizontal_anim: Option<ScrollAnimation>,
-}
-
-impl Default for ScrollState {
-    fn default() -> Self {
-        Self {
-            scroll_offset: 0.0,
-            target_scroll_offset: 0.0,
-            horizontal_scroll_offset: 0.0,
-            target_horizontal_scroll_offset: 0.0,
-            smooth_scroll_duration: 0.125,
-            vertical_anim: None,
-            horizontal_anim: None,
-        }
-    }
+    pub(crate) horizontal_anim: Option<ScrollAnimation>,
 }
 
 #[derive(Clone, Debug)]
-pub struct ScrollAnimation {
+pub(crate) struct ScrollAnimation {
     pub from: f32,
     pub to: f32,
     pub elapsed: f32,
@@ -178,7 +176,7 @@ pub struct ScrollAnimation {
 /// Two-stage composite curve for jumps > 2.5× viewport; avoids the floaty
 /// tail that a single easeOutCubic produces over large distances.
 #[derive(Clone, Debug)]
-pub struct CompositeStops {
+pub(crate) struct CompositeStops {
     pub stop1: f32,
     pub stop2: f32,
     pub split: f32,

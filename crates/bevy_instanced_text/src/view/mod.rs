@@ -28,6 +28,6 @@ pub use plugin::{
 };
 pub use render::{BatchTransform, GlyphBatchComponent, GlyphInstance};
 pub use snapshot::{ShapedLine, StyleRun, TextDecoration};
-pub use state::{ContentMetrics, ScrollState, TextBuffer, TextContent, TextSpan};
+pub use state::{ContentMetrics, SmoothScroll, TextBuffer, TextContent, TextSpan};
 pub use styling::{HiddenLines, LineStyles, RunWithText, TextBounds};
 pub use theme::{TextBackgroundColor, TextColor};

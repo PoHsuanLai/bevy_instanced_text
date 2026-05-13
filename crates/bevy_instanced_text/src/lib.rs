@@ -32,8 +32,8 @@
 //! or overlay placement read `DisplayLayout` and the [`RowMetrics`] /
 //! [`BufferAnchorParam`] helpers.
 //!
-//! **Scroll state** ([`ScrollState`], [`ContentMetrics`]) is data only; the
-//! engine does not render a scrollbar — attach your own or skip it.
+//! **Scroll state** ([`bevy::ui::ScrollPosition`] + [`SmoothScroll`], [`ContentMetrics`]) is data
+//! only; the engine does not render a scrollbar — attach your own or skip it.
 //!
 //! ## Camera setup
 //!
@@ -117,7 +117,7 @@ pub mod prelude {
         row_metrics, row_metrics_with_baseline, ContentMetrics, CornerRadii, DisplayLayout,
         FontSynthesis, HiddenLines, InstancedTextPlugin, InstancedTextPlugins, LineStyles,
         MonoCellWidth, MonoFontFaces, RectOverlay, RowMetrics, RowMetricsParam, RowVertical,
-        RunWithText, ScrollState, StyleRun, TextBackgroundColor, TextBounds, TextBuffer,
+        RunWithText, SmoothScroll, StyleRun, TextBackgroundColor, TextBounds, TextBuffer,
         TextColor, TextContent, TextContentPlugin, TextSpan, TextViewOverlays,
     };
 }

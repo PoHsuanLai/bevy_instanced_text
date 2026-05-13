@@ -39,7 +39,8 @@ use bevy::ui::ComputedNode;
 use super::anchor::{row_metrics_with_baseline, RowMetrics, DEFAULT_BASELINE_OFFSET_RATIO};
 use super::font::MonoCellWidth;
 use super::layout::DisplayLayout;
-use super::state::{ScrollState, TextBuffer};
+use super::state::{SmoothScroll, TextBuffer};
+use bevy::ui::ScrollPosition;
 use bevy::text::TextFont;
 
 /// Resolved coordinates for a buffer position, in node-local logical
@@ -82,7 +83,8 @@ type BufferAnchorQuery<'w, 's> = Query<
     (
         Entity,
         &'static ComputedNode,
-        &'static ScrollState,
+        &'static ScrollPosition,
+        &'static SmoothScroll,
         &'static TextFont,
         &'static bevy::text::LineHeight,
         &'static MonoCellWidth,
@@ -103,14 +105,14 @@ impl<'w, 's> BufferAnchorParam<'w, 's> {
     /// attached, or a monospace cell index otherwise. LSP servers
     /// report UTF-16 code units; convert before calling for non-ASCII.
     pub fn at_buffer_pos(&self, entity: Entity, line: u32, character: u32) -> Option<AnchorPoint> {
-        let (_, computed, scroll, font, lh, mono, _buffer, layout) = self.query.get(entity).ok()?;
+        let (_, computed, scroll_pos, smooth, font, lh, mono, _buffer, layout) = self.query.get(entity).ok()?;
         let line_height = crate::view::font::resolve_line_height(*lh, font.font_size);
-        let metrics = build_metrics(computed, scroll, font, line_height, mono, layout);
+        let metrics = build_metrics(computed, scroll_pos.y, smooth.horizontal, font, line_height, mono, layout);
 
         let (display_row, pixel_x) =
             resolve_display_row_and_x(line, character as usize, mono, layout);
 
-        Some(self.build_anchor(computed, scroll, line_height, &metrics, display_row, pixel_x))
+        Some(self.build_anchor(computed, line_height, &metrics, display_row, pixel_x))
     }
 
     /// Anchor a rope-flavored `char_index` (offset within
@@ -118,9 +120,9 @@ impl<'w, 's> BufferAnchorParam<'w, 's> {
     /// the trigger position as a rope offset rather than `(line,
     /// character)`.
     pub fn at_rope_char_index(&self, entity: Entity, char_index: usize) -> Option<AnchorPoint> {
-        let (_, computed, scroll, font, lh, mono, buffer, layout) = self.query.get(entity).ok()?;
+        let (_, computed, scroll_pos, smooth, font, lh, mono, buffer, layout) = self.query.get(entity).ok()?;
         let line_height = crate::view::font::resolve_line_height(*lh, font.font_size);
-        let metrics = build_metrics(computed, scroll, font, line_height, mono, layout);
+        let metrics = build_metrics(computed, scroll_pos.y, smooth.horizontal, font, line_height, mono, layout);
 
         let char_index = char_index.min(buffer.rope.len_chars());
         let line_index = buffer.rope.char_to_line(char_index);
@@ -131,13 +133,12 @@ impl<'w, 's> BufferAnchorParam<'w, 's> {
         let (display_row, pixel_x) =
             resolve_display_row_and_x(line_index as u32, byte_in_line, mono, layout);
 
-        Some(self.build_anchor(computed, scroll, line_height, &metrics, display_row, pixel_x))
+        Some(self.build_anchor(computed, line_height, &metrics, display_row, pixel_x))
     }
 
     fn build_anchor(
         &self,
         computed: &ComputedNode,
-        scroll: &ScrollState,
         line_height: f32,
         metrics: &RowMetrics,
         display_row: u32,
@@ -157,8 +158,7 @@ impl<'w, 's> BufferAnchorParam<'w, 's> {
             && top_left.x < logical.x
             && top_left.y + line_height <= logical.y;
 
-        // `scroll`/`computed` are read indirectly via `metrics`.
-        let _ = scroll;
+        // `computed` is read indirectly via `metrics`.
         let _ = computed;
 
         AnchorPoint {
@@ -176,7 +176,8 @@ impl<'w, 's> BufferAnchorParam<'w, 's> {
 
 fn build_metrics(
     computed: &ComputedNode,
-    scroll: &ScrollState,
+    scroll_y: f32,
+    horizontal_scroll: f32,
     font: &TextFont,
     line_height: f32,
     mono: &MonoCellWidth,
@@ -185,7 +186,7 @@ fn build_metrics(
     let baseline = layout
         .map(|l| l.baseline_offset)
         .unwrap_or(font.font_size * DEFAULT_BASELINE_OFFSET_RATIO);
-    row_metrics_with_baseline(computed, scroll, line_height, mono, baseline)
+    row_metrics_with_baseline(computed, scroll_y, horizontal_scroll, line_height, mono, baseline)
 }
 
 fn resolve_display_row_and_x(
@@ -213,6 +214,7 @@ mod tests {
     use super::*;
     use crate::view::font::MonoCellWidth;
     use crate::view::layout::DisplayLayout;
+    use crate::view::state::SmoothScroll;
     use bevy::asset::Handle;
     use bevy::ecs::system::RunSystemOnce;
     use bevy::math::Vec2;
@@ -228,13 +230,9 @@ mod tests {
 
     fn make_editor_world() -> (World, Entity) {
         let computed = make_computed();
-        let scroll = ScrollState {
-            scroll_offset: -100.0,
-            target_scroll_offset: -100.0,
-            horizontal_scroll_offset: 0.0,
-            target_horizontal_scroll_offset: 0.0,
-            ..Default::default()
-        };
+        // scroll_pos.y=100.0 is equivalent to the old scroll_offset=-100.0.
+        let scroll_pos = bevy::ui::ScrollPosition(Vec2::new(0.0, 100.0));
+        let smooth = SmoothScroll { target_y: 100.0, horizontal: 0.0, ..Default::default() };
         let font = bevy::text::TextFont::from_font_size(14.0);
         let line_height = bevy::text::LineHeight::Px(21.0);
         let mono = MonoCellWidth { px: 8.4 };
@@ -243,7 +241,7 @@ mod tests {
         layout.baseline_offset = 14.0 * 0.32;
 
         let mut world = World::new();
-        let entity = world.spawn((computed, scroll, font, line_height, mono, buffer, layout)).id();
+        let entity = world.spawn((computed, scroll_pos, smooth, font, line_height, mono, buffer, layout)).id();
         (world, entity)
     }
 
@@ -276,14 +274,15 @@ mod tests {
     #[test]
     fn fallback_uses_monospace_columns() {
         let computed = make_computed();
-        let scroll = ScrollState::default();
+        let scroll_pos = bevy::ui::ScrollPosition::default();
+        let smooth = SmoothScroll::default();
         let font = bevy::text::TextFont::from_font_size(14.0);
         let line_height = bevy::text::LineHeight::Px(21.0);
         let mono = MonoCellWidth { px: 8.4 };
         let buffer = TextBuffer::new("plain text");
 
         let mut world = World::new();
-        let entity = world.spawn((computed, scroll, font, line_height, mono, buffer)).id();
+        let entity = world.spawn((computed, scroll_pos, smooth, font, line_height, mono, buffer)).id();
 
         let anchor = world
             .run_system_once(move |anchors: BufferAnchorParam| {
@@ -310,15 +309,8 @@ mod tests {
         // Legacy formula from examples/editor_lsp.rs::cursor_screen_pos
         // — now lives entirely in `RowMetrics::cell_top_left_at_x`.
         let computed = make_computed();
-        let scroll = ScrollState {
-            scroll_offset: -100.0,
-            target_scroll_offset: -100.0,
-            horizontal_scroll_offset: 0.0,
-            target_horizontal_scroll_offset: 0.0,
-            ..Default::default()
-        };
         let mono = MonoCellWidth { px: 8.4 };
-        let metrics = super::row_metrics_with_baseline(&computed, &scroll, 21.0, &mono, 14.0 * 0.32);
+        let metrics = super::row_metrics_with_baseline(&computed, 100.0, 0.0, 21.0, &mono, 14.0 * 0.32);
         let expected = metrics.cell_top_left_at_x(1, 3.0 * mono.px);
 
         assert!((anchor.top_left.x - expected.x).abs() < 1e-3);
@@ -338,15 +330,8 @@ mod tests {
             .unwrap();
 
         let computed = make_computed();
-        let scroll = ScrollState {
-            scroll_offset: -100.0,
-            target_scroll_offset: -100.0,
-            horizontal_scroll_offset: 0.0,
-            target_horizontal_scroll_offset: 0.0,
-            ..Default::default()
-        };
         let mono = MonoCellWidth { px: 8.4 };
-        let metrics = super::row_metrics_with_baseline(&computed, &scroll, 21.0, &mono, 14.0 * 0.32);
+        let metrics = super::row_metrics_with_baseline(&computed, 100.0, 0.0, 21.0, &mono, 14.0 * 0.32);
         let expected = metrics.cell_top_left_at_x(2, 4.0 * mono.px);
 
         assert!((anchor.top_left - expected).length() < 1e-3);

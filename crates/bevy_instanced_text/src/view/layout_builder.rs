@@ -15,7 +15,8 @@ use std::sync::Arc;
 use super::font::MonoCellWidth;
 use super::layout::DisplayLayout;
 use super::snapshot::{LineShape, ShapedGlyph, ShapedLine, StyleRun};
-use super::state::{ContentMetrics, ScrollState, TextBuffer, TextContent};
+use super::state::{ContentMetrics, SmoothScroll, TextBuffer, TextContent};
+use bevy::ui::ScrollPosition;
 use super::styling::{HiddenLines, LineStyles, RunWithText, TextBounds};
 use bevy::ui::ComputedNode;
 use crate::gpu::GlyphAtlas;
@@ -62,7 +63,7 @@ pub struct LayoutFingerprint {
 /// display row is past the visible bottom.
 pub fn visible_buffer_range(
     buffer: &impl TextContent,
-    scroll: &ScrollState,
+    scroll_y: f32,
     viewport_height: f32,
     text_area_top: f32,
     line_height: f32,
@@ -76,8 +77,7 @@ pub fn visible_buffer_range(
     }
 
     let buf_px = line_height * VIEWPORT_BUFFER_LINES as f32;
-    let scroll_dist = scroll.scroll_offset.abs();
-    let start_pixels = scroll_dist - text_area_top - buf_px;
+    let start_pixels = scroll_y - text_area_top - buf_px;
     let first_visible_display_row = (start_pixels / line_height).floor().max(0.0) as u32;
     let visible_count = ((viewport_height + buf_px * 2.0) / line_height).ceil() as u32;
     let last_visible_display_row = first_visible_display_row + visible_count;
@@ -122,7 +122,8 @@ pub fn produce_layouts<T: TextContent + Component>(
         (
             Entity,
             Ref<TextBuffer<T>>,
-            &ScrollState,
+            &ScrollPosition,
+            &SmoothScroll,
             &mut ContentMetrics,
             &ComputedNode,
             &TextFont,
@@ -144,7 +145,8 @@ pub fn produce_layouts<T: TextContent + Component>(
     for (
         entity,
         buffer,
-        scroll,
+        scroll_pos,
+        smooth,
         mut metrics,
         tv_viewport,
         font,
@@ -176,8 +178,8 @@ pub fn produce_layouts<T: TextContent + Component>(
         let text_area_top = tv_viewport.content_inset().min_inset.y * inv;
         let fingerprint = LayoutFingerprint {
             buffer_changed: buffer.is_changed(),
-            scroll_bits: scroll.scroll_offset.to_bits(),
-            h_scroll_bits: scroll.horizontal_scroll_offset.to_bits(),
+            scroll_bits: scroll_pos.y.to_bits(),
+            h_scroll_bits: smooth.horizontal.to_bits(),
             viewport_w: logical.x as u32,
             viewport_h: logical.y as u32,
             viewport_top_bits: text_area_top.to_bits(),
@@ -202,7 +204,8 @@ pub fn produce_layouts<T: TextContent + Component>(
                 let _miss = bevy::prelude::info_span!($miss_name).entered();
                 let new_layout = build_display_layout(
                     &**buffer,
-                    scroll,
+                    scroll_pos.y,
+                    smooth.horizontal,
                     &mut metrics,
                     tv_viewport,
                     font,
@@ -259,7 +262,8 @@ pub fn produce_layouts<T: TextContent + Component>(
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn build_display_layout(
     buffer: &impl TextContent,
-    scroll: &ScrollState,
+    scroll_y: f32,
+    _horizontal_scroll: f32,
     metrics: &mut ContentMetrics,
     viewport: &ComputedNode,
     font: &TextFont,
@@ -296,8 +300,7 @@ pub(crate) fn build_display_layout(
     let logical = viewport.size() * inv;
     let text_area_top = viewport.content_inset().min_inset.y * inv;
     let buf_px = line_height * buffer_lines as f32;
-    let scroll_dist = scroll.scroll_offset.abs();
-    let start_pixels = scroll_dist - text_area_top - buf_px;
+    let start_pixels = scroll_y - text_area_top - buf_px;
     let first_visible_display_row = (start_pixels / line_height).floor().max(0.0) as u32;
     let visible_count = ((logical.y + buf_px * 2.0) / line_height).ceil() as u32;
     let last_visible_display_row = first_visible_display_row + visible_count;
@@ -387,7 +390,7 @@ pub(crate) fn build_display_layout(
         // applied. Renderer + overlay math derive baseline / band positions
         // from this, so `y_top` consistently means "top of the leaded box".
         let y_top_for = |display_row: u32| -> f32 {
-            text_area_top + scroll.scroll_offset + display_row as f32 * line_height
+            text_area_top - scroll_y + display_row as f32 * line_height
         };
 
         // When wrap is on and the shaped line exceeds the budget, split into
@@ -680,7 +683,8 @@ mod tests {
         let mut metrics = ContentMetrics::default();
         build_display_layout(
             &text.to_owned(),
-            &ScrollState::default(),
+            0.0,
+            0.0,
             &mut metrics,
             &test_computed(),
             &test_font(),
@@ -786,7 +790,8 @@ mod tests {
                 TextBuffer::new(crate::view::state::TextSpan::new(
                     "hello world\nsecond line\nthird line\n",
                 )),
-                ScrollState::default(),
+                bevy::ui::ScrollPosition::default(),
+                SmoothScroll::default(),
                 ContentMetrics::default(),
                 test_computed(),
                 test_font(),

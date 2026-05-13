@@ -18,7 +18,8 @@ use super::layout::DisplayLayout;
 use super::layout_builder::{produce_layouts, LayoutProduceSet};
 use super::overlay::TextViewOverlays;
 use super::render::{render_layout, BatchTransform, GlyphBatchComponent, TextViewBatch};
-use super::state::{CompositeStops, ContentMetrics, ScrollAnimation, ScrollState, TextBuffer, TextContent};
+use super::state::{CompositeStops, ContentMetrics, ScrollAnimation, SmoothScroll, TextBuffer, TextContent};
+use bevy::ui::ScrollPosition;
 use super::styling::TextBounds;
 use super::theme::{TextBackgroundColor, TextColor};
 use super::tuning::LayoutTuning;
@@ -55,7 +56,9 @@ impl<T: TextContent + Component> Plugin for TextContentPlugin<T> {
                 bevy::text::LineHeight::RelativeToFont(1.5)
             });
         app.world_mut()
-            .register_required_components::<TextBuffer<T>, ScrollState>();
+            .register_required_components::<TextBuffer<T>, ScrollPosition>();
+        app.world_mut()
+            .register_required_components::<TextBuffer<T>, SmoothScroll>();
         app.world_mut()
             .register_required_components::<TextBuffer<T>, ContentMetrics>();
         app.world_mut()
@@ -118,14 +121,18 @@ impl Plugin for InstancedTextPlugin {
             .register_type::<TextBackgroundColor>()
             .register_type::<TextViewBatchEntity>()
             .register_type::<TextViewOverlays>()
-            .register_type::<ScrollState>()
+            .register_type::<SmoothScroll>()
             .register_type::<ContentMetrics>();
 
         app.register_type::<super::state::TextSpan>();
         // Register the TextSpan content type so simple labels work out of the box.
         app.add_plugins(TextContentPlugin::<super::state::TextSpan>::default());
 
-        app.add_systems(Update, animate_text_view_scroll);
+        app.add_systems(
+            PostUpdate,
+            animate_text_view_scroll
+                .before(UiSystems::Layout),
+        );
 
         // Ensure there is always a camera marked as the default UI camera so
         // Bevy UI layout can resolve Val::Percent sizes for TextBuffer<T> Node entities.
@@ -221,12 +228,12 @@ fn build_animation(from: f32, to: f32, duration: f32, viewport_size: f32) -> Scr
 }
 
 fn animate_text_view_scroll(
-    mut query: Query<(&mut ScrollState, &ComputedNode), With<DisplayLayout>>,
+    mut query: Query<(&mut SmoothScroll, &mut ScrollPosition, &ComputedNode), With<DisplayLayout>>,
     time: Res<Time>,
 ) {
     let dt = time.delta_secs();
 
-    for (mut state, computed) in query.iter_mut() {
+    for (mut smooth, mut scroll_pos, computed) in query.iter_mut() {
         let inv = computed.inverse_scale_factor();
         let logical = computed.size() * inv;
         let viewport_h = logical.y;
@@ -234,59 +241,44 @@ fn animate_text_view_scroll(
 
         // Read current values without triggering change detection.
         let (duration, target_v, scroll_v, target_h, scroll_h, has_v_anim, has_h_anim) = {
-            let s = state.bypass_change_detection();
+            let s = smooth.bypass_change_detection();
+            let sp = scroll_pos.bypass_change_detection();
             (
-                s.smooth_scroll_duration,
-                s.target_scroll_offset,
-                s.scroll_offset,
-                s.target_horizontal_scroll_offset,
-                s.horizontal_scroll_offset,
+                s.duration,
+                s.target_y,
+                sp.y,
+                s.target_x,
+                s.horizontal,
                 s.vertical_anim.is_some(),
                 s.horizontal_anim.is_some(),
             )
         };
 
         let needs_new_v = if has_v_anim {
-            let to = state
-                .bypass_change_detection()
-                .vertical_anim
-                .as_ref()
-                .unwrap()
-                .to;
+            let to = smooth.bypass_change_detection().vertical_anim.as_ref().unwrap().to;
             (to - target_v).abs() > f32::EPSILON
         } else {
             (target_v - scroll_v).abs() > 0.5
         };
 
         let needs_new_h = if has_h_anim {
-            let to = state
-                .bypass_change_detection()
-                .horizontal_anim
-                .as_ref()
-                .unwrap()
-                .to;
+            let to = smooth.bypass_change_detection().horizontal_anim.as_ref().unwrap().to;
             (to - target_h).abs() > f32::EPSILON
         } else {
             (target_h - scroll_h).abs() > 0.5
         };
 
-        // Determine new anim state without writing yet.
-        // Both fresh starts and mid-animation combines use `scroll_v` as `from`
-        // (the current visual position, i.e. `this._state` in VS Code terms),
-        // with the 10ms backdate. VS Code's combine() calls start() with the
-        // same signature — no special from-preservation.
         let v_anim_next = if needs_new_v {
             Some(build_animation(scroll_v, target_v, duration, viewport_h))
         } else {
-            state.bypass_change_detection().vertical_anim.clone()
+            smooth.bypass_change_detection().vertical_anim.clone()
         };
         let h_anim_next = if needs_new_h {
             Some(build_animation(scroll_h, target_h, duration, viewport_w))
         } else {
-            state.bypass_change_detection().horizontal_anim.clone()
+            smooth.bypass_change_detection().horizontal_anim.clone()
         };
 
-        // Step animations and compute new scroll values.
         let (new_scroll_v, new_v_anim) = match v_anim_next {
             Some(mut anim) => {
                 anim.elapsed += dt;
@@ -313,20 +305,22 @@ fn animate_text_view_scroll(
             None => (scroll_h, None),
         };
 
-        // Only write through the real Mut (triggering change detection) when
-        // values actually changed. This prevents spurious Changed<ScrollState>
-        // on idle frames, which was causing produce_line_styles to rebuild the
-        // full visible window every frame.
+        // Only write through real Mut (triggering change detection) when values
+        // actually changed — prevents spurious layout rebuilds on idle frames.
         let scroll_v_changed = (new_scroll_v - scroll_v).abs() > 1e-4;
         let scroll_h_changed = (new_scroll_h - scroll_h).abs() > 1e-4;
         let v_anim_changed = needs_new_v || has_v_anim != new_v_anim.is_some();
         let h_anim_changed = needs_new_h || has_h_anim != new_h_anim.is_some();
 
-        if scroll_v_changed || scroll_h_changed || v_anim_changed || h_anim_changed {
-            state.scroll_offset = new_scroll_v;
-            state.horizontal_scroll_offset = new_scroll_h;
-            state.vertical_anim = new_v_anim;
-            state.horizontal_anim = new_h_anim;
+        if scroll_v_changed || v_anim_changed || h_anim_changed || scroll_h_changed {
+            if scroll_v_changed {
+                scroll_pos.y = new_scroll_v;
+            }
+            if scroll_h_changed || v_anim_changed || h_anim_changed {
+                smooth.horizontal = new_scroll_h;
+                smooth.vertical_anim = new_v_anim;
+                smooth.horizontal_anim = new_h_anim;
+            }
         }
     }
 }
@@ -337,7 +331,8 @@ pub fn update_text_views(
     mut text_views: Query<
         (
             Entity,
-            &ScrollState,
+            &ScrollPosition,
+            &SmoothScroll,
             &ComputedNode,
             &UiGlobalTransform,
             Option<&CalculatedClip>,
@@ -357,7 +352,7 @@ pub fn update_text_views(
     fonts: Res<Assets<bevy::text::Font>>,
 ) {
     let _span = bevy::prelude::info_span!("update_text_views").entered();
-    for (tv_entity, scroll, computed, ui_transform, clip, target_cam, font, faces_cfg, text_layout, layout, overlays, batch_entity_opt, render_layers) in
+    for (tv_entity, scroll_pos, smooth, computed, ui_transform, clip, target_cam, font, faces_cfg, text_layout, layout, overlays, batch_entity_opt, render_layers) in
         text_views.iter_mut()
     {
         let regular = atlas.ensure_font(&font.font, &fonts);
@@ -423,7 +418,7 @@ pub fn update_text_views(
                 super::render::RenderContext {
                     content_start_x,
                     content_end_inset_x,
-                    horizontal_scroll_offset: scroll.horizontal_scroll_offset,
+                    horizontal_scroll_offset: smooth.horizontal,
                     font_size: font.font_size,
                     faces,
                     justify: text_layout.justify,
@@ -436,15 +431,14 @@ pub fn update_text_views(
         let logical = computed.size() * inv;
         let text_area_top = computed.content_inset().min_inset.y * inv;
         let line_height = layout.line_height;
-        let scroll_dist = scroll.scroll_offset.abs();
-        let start_pixels = scroll_dist - text_area_top;
+        let start_pixels = scroll_pos.y - text_area_top;
         let first_visible = (start_pixels / line_height).floor().max(0.0) as usize;
         let visible_count = (logical.y / line_height).ceil() as usize;
         let last_visible = first_visible + visible_count;
 
         let batch_data = TextViewBatch {
-            built_at_scroll: scroll.scroll_offset,
-            built_at_horizontal_scroll: scroll.horizontal_scroll_offset,
+            built_at_scroll: scroll_pos.y,
+            built_at_horizontal_scroll: smooth.horizontal,
             first_line: first_visible,
             last_line: last_visible,
             built_at_width: logical.x as u32,
