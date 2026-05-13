@@ -103,21 +103,17 @@ struct ReleaseObserverRegistered;
 struct InstantScrollRegistered;
 
 fn apply_instant_scroll(
-    mut q: Query<(
-        &mut bevy_instanced_text::SmoothScroll,
-        &mut bevy::ui::ScrollPosition,
-        &ScrollConfig,
-    )>,
+    mut q: Query<(&mut bevy_instanced_text::SmoothScroll, &ScrollConfig)>,
 ) {
-    for (mut smooth, mut scroll_pos, cfg) in q.iter_mut() {
+    for (mut smooth, cfg) in q.iter_mut() {
         if (smooth.duration - cfg.smooth_scroll_duration).abs() > f32::EPSILON {
             smooth.duration = cfg.smooth_scroll_duration;
         }
         if cfg.smooth {
             continue;
         }
-        if (smooth.target_y - scroll_pos.y).abs() > 0.001 {
-            scroll_pos.y = smooth.target_y;
+        if (smooth.target_y - smooth.offset_y).abs() > 0.001 {
+            smooth.offset_y = smooth.target_y;
         }
         if (smooth.target_x - smooth.horizontal).abs() > 0.001 {
             smooth.horizontal = smooth.target_x;

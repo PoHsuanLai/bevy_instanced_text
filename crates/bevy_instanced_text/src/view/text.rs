@@ -231,16 +231,16 @@ impl<T: TextContent + Default> Default for TextBuffer<T> {
     }
 }
 
-/// Smooth-scroll animation targets and current horizontal offset.
+/// Smooth-scroll animation targets and current offsets.
 ///
-/// Hosts write `target_y` / `target_x` to request scroll; the engine's
-/// `animate_text_view_scroll` system drives `bevy::ui::ScrollPosition.y`
-/// (vertical) and `horizontal` (horizontal) toward those targets each frame.
+/// Hosts write `target_y` / `target_x` to request scroll. The engine's
+/// `animate_text_view_scroll` system drives `offset_y` and `horizontal`
+/// toward those targets each frame.
 ///
-/// For instant (non-animated) scroll, write both
-/// `bevy::ui::ScrollPosition.y` and `target_y` to the same value.
+/// For instant (non-animated) scroll, write both `offset_y` and `target_y`
+/// to the same value (and similarly for horizontal).
 ///
-/// Sign convention: positive = down / right (Bevy-native).
+/// Sign convention: positive = down / right.
 #[derive(Component, Default, Reflect)]
 #[reflect(Component, Default)]
 pub struct SmoothScroll {
@@ -248,6 +248,9 @@ pub struct SmoothScroll {
     pub target_y: f32,
     /// Horizontal smooth-scroll target in logical pixels, positive = right.
     pub target_x: f32,
+    /// Current animated vertical offset. Written by the engine; read by
+    /// renderers. Not the same as `target_y` when an animation is in flight.
+    pub offset_y: f32,
     /// Current animated horizontal offset. Written by the engine; read by
     /// renderers. Not the same as `target_x` when an animation is in flight.
     pub horizontal: f32,

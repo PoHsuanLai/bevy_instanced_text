@@ -228,12 +228,12 @@ fn build_animation(from: f32, to: f32, duration: f32, viewport_size: f32) -> Scr
 }
 
 fn animate_text_view_scroll(
-    mut query: Query<(&mut SmoothScroll, &mut ScrollPosition, &ComputedNode), With<DisplayLayout>>,
+    mut query: Query<(&mut SmoothScroll, &ComputedNode), With<DisplayLayout>>,
     time: Res<Time>,
 ) {
     let dt = time.delta_secs();
 
-    for (mut smooth, mut scroll_pos, computed) in query.iter_mut() {
+    for (mut smooth, computed) in query.iter_mut() {
         let inv = computed.inverse_scale_factor();
         let logical = computed.size() * inv;
         let viewport_h = logical.y;
@@ -242,11 +242,10 @@ fn animate_text_view_scroll(
         // Read current values without triggering change detection.
         let (duration, target_v, scroll_v, target_h, scroll_h, has_v_anim, has_h_anim) = {
             let s = smooth.bypass_change_detection();
-            let sp = scroll_pos.bypass_change_detection();
             (
                 s.duration,
                 s.target_y,
-                sp.y,
+                s.offset_y,
                 s.target_x,
                 s.horizontal,
                 s.vertical_anim.is_some(),
@@ -314,7 +313,7 @@ fn animate_text_view_scroll(
 
         if scroll_v_changed || v_anim_changed || h_anim_changed || scroll_h_changed {
             if scroll_v_changed {
-                scroll_pos.y = new_scroll_v;
+                smooth.offset_y = new_scroll_v;
             }
             if scroll_h_changed || v_anim_changed || h_anim_changed {
                 smooth.horizontal = new_scroll_h;
@@ -331,7 +330,6 @@ pub fn update_text_views(
     mut text_views: Query<
         (
             Entity,
-            &ScrollPosition,
             &SmoothScroll,
             &ComputedNode,
             &UiGlobalTransform,
@@ -352,7 +350,7 @@ pub fn update_text_views(
     fonts: Res<Assets<bevy::text::Font>>,
 ) {
     let _span = bevy::prelude::info_span!("update_text_views").entered();
-    for (tv_entity, scroll_pos, smooth, computed, ui_transform, clip, target_cam, font, faces_cfg, text_layout, layout, overlays, batch_entity_opt, render_layers) in
+    for (tv_entity, smooth, computed, ui_transform, clip, target_cam, font, faces_cfg, text_layout, layout, overlays, batch_entity_opt, render_layers) in
         text_views.iter_mut()
     {
         let regular = atlas.ensure_font(&font.font, &fonts);
@@ -431,13 +429,13 @@ pub fn update_text_views(
         let logical = computed.size() * inv;
         let text_area_top = computed.content_inset().min_inset.y * inv;
         let line_height = layout.line_height;
-        let start_pixels = scroll_pos.y - text_area_top;
+        let start_pixels = smooth.offset_y - text_area_top;
         let first_visible = (start_pixels / line_height).floor().max(0.0) as usize;
         let visible_count = (logical.y / line_height).ceil() as usize;
         let last_visible = first_visible + visible_count;
 
         let batch_data = TextViewBatch {
-            built_at_scroll: scroll_pos.y,
+            built_at_scroll: smooth.offset_y,
             built_at_horizontal_scroll: smooth.horizontal,
             first_line: first_visible,
             last_line: last_visible,

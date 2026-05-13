@@ -122,7 +122,6 @@ pub fn produce_layouts<T: TextContent + Component>(
         (
             Entity,
             Ref<TextBuffer<T>>,
-            &ScrollPosition,
             &SmoothScroll,
             &mut ContentMetrics,
             &ComputedNode,
@@ -145,7 +144,6 @@ pub fn produce_layouts<T: TextContent + Component>(
     for (
         entity,
         buffer,
-        scroll_pos,
         smooth,
         mut metrics,
         tv_viewport,
@@ -178,7 +176,7 @@ pub fn produce_layouts<T: TextContent + Component>(
         let text_area_top = tv_viewport.content_inset().min_inset.y * inv;
         let fingerprint = LayoutFingerprint {
             buffer_changed: buffer.is_changed(),
-            scroll_bits: scroll_pos.y.to_bits(),
+            scroll_bits: smooth.offset_y.to_bits(),
             h_scroll_bits: smooth.horizontal.to_bits(),
             viewport_w: logical.x as u32,
             viewport_h: logical.y as u32,
@@ -204,7 +202,7 @@ pub fn produce_layouts<T: TextContent + Component>(
                 let _miss = bevy::prelude::info_span!($miss_name).entered();
                 let new_layout = build_display_layout(
                     &**buffer,
-                    scroll_pos.y,
+                    smooth.offset_y,
                     smooth.horizontal,
                     &mut metrics,
                     tv_viewport,

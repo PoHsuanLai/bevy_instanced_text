@@ -34,7 +34,6 @@ type ScrollQuery<'w, 's, T> = Query<
     (
         &'static TextBuffer<T>,
         &'static mut SmoothScroll,
-        &'static mut bevy::ui::ScrollPosition,
         &'static ContentMetrics,
         &'static ComputedNode,
         &'static TextFont,
@@ -51,7 +50,6 @@ type PressQuery<'w, 's, T> = Query<
     (
         &'static mut TextViewDragState,
         &'static TextBuffer<T>,
-        &'static bevy::ui::ScrollPosition,
         &'static mut SmoothScroll,
         &'static TextFont,
         &'static bevy::text::LineHeight,
@@ -71,7 +69,6 @@ type DragQuery<'w, 's, T> = Query<
     (
         &'static mut TextViewDragState,
         &'static TextBuffer<T>,
-        &'static bevy::ui::ScrollPosition,
         &'static mut SmoothScroll,
         &'static TextFont,
         &'static bevy::text::LineHeight,
@@ -248,7 +245,7 @@ pub fn on_pointer_scroll<T: TextContent + Component>(
     mut views: ScrollQuery<T>,
 ) {
     let entity = trigger.event().entity;
-    let Ok((buffer, mut smooth, mut scroll_pos, metrics, computed, font, lh, mono, scroll_cfg)) =
+    let Ok((buffer, mut smooth, metrics, computed, font, lh, mono, scroll_cfg)) =
         views.get_mut(entity)
     else {
         return;
@@ -290,15 +287,16 @@ pub fn on_pointer_scroll<T: TextContent + Component>(
 
     // Vertical scroll. scroll_pos.y is positive-downward.
     if dy.abs() > 0.0 {
-        let scroll_delta = dy * v_delta_per_dy;
+        let scroll_delta = -dy * v_delta_per_dy;
         let line_count = buffer.line_count();
         let content_height = line_count as f32 * line_height;
         let max_scroll = (content_height - viewport_height + text_area_top).max(0.0);
         if scroll_cfg.smooth {
             smooth.target_y = (smooth.target_y + scroll_delta).clamp(0.0, max_scroll);
         } else {
-            scroll_pos.y = (scroll_pos.y + scroll_delta).clamp(0.0, max_scroll);
-            smooth.target_y = scroll_pos.y;
+            let instant = (smooth.offset_y + scroll_delta).clamp(0.0, max_scroll);
+            smooth.offset_y = instant;
+            smooth.target_y = instant;
         }
     }
 }
@@ -322,8 +320,7 @@ pub fn on_pointer_press<T: TextContent + Component>(
     let Ok((
         mut drag_state,
         buffer,
-        scroll_pos,
-        _smooth,
+        mut smooth,
         font,
         lh,
         mono,
@@ -354,7 +351,7 @@ pub fn on_pointer_press<T: TextContent + Component>(
         local_pos,
         &**buffer,
         layout,
-        scroll_pos.y,
+        smooth.offset_y,
         mono,
         line_height,
         text_area_left,
@@ -428,7 +425,7 @@ pub fn on_pointer_press<T: TextContent + Component>(
     }
     drag_state.is_dragging = true;
     drag_state.drag_start_pos = Some(char_pos);
-    drag_state.drag_start_scroll_offset = scroll_pos.y;
+    drag_state.drag_start_scroll_offset = smooth.offset_y;
     drag_state.last_screen_pos = Some(trigger.event().pointer_location.position);
     input_focus.set(entity);
 }
@@ -475,8 +472,7 @@ pub fn on_pointer_drag<T: TextContent + Component>(
     let Ok((
         mut drag_state,
         buffer,
-        scroll_pos,
-        _smooth,
+        smooth,
         font,
         lh,
         mono,
@@ -512,7 +508,7 @@ pub fn on_pointer_drag<T: TextContent + Component>(
         local_pos,
         &**buffer,
         layout,
-        scroll_pos.y,
+        smooth.offset_y,
         mono,
         line_height,
         text_area_left,
