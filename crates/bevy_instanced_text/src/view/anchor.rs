@@ -14,6 +14,7 @@
 //! # use bevy::prelude::*;
 //! # use bevy_instanced_text::prelude::*;
 //! # use bevy_instanced_text::{MonoCellWidth, resolve_line_height, SmoothScroll};
+//! # use bevy_instanced_text::view::layout::DisplayLayout;
 //! # use bevy_instanced_text::view::anchor::row_metrics;
 //! fn position_my_popup(
 //!     editor: Query<(

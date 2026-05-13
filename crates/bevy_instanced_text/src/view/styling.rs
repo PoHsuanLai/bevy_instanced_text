@@ -6,7 +6,6 @@
 
 use bevy::prelude::*;
 use std::collections::{HashMap, HashSet};
-use std::ops::Range;
 use std::sync::Arc;
 
 use super::snapshot::StyleRun;
@@ -35,24 +34,22 @@ impl HiddenLines {
 /// Producers (e.g. the editor's syntax-styling system) compute styled runs
 /// for the visible buffer-line window via the shared
 /// [`super::layout_builder::visible_buffer_range`] helper, build a fresh
-/// `HashMap`, and write a new `LineStyles` Component. Lines outside
-/// `covered` (or with no map entry) fall back to plain text.
+/// `HashMap`, and write a new `LineStyles` Component.
+///
+/// **Single-writer rule**: at most one system per entity should write
+/// `LineStyles` per frame. Two producers writing to the same entity will
+/// silently overwrite each other.
 #[derive(Component, Default, Clone)]
 pub struct LineStyles {
-    /// Maps `buffer_line → styled runs`. Sparse: only the producer's
-    /// covered window is populated. Lines absent from the map render plain.
+    /// Maps `buffer_line → styled runs`. Sparse: only the visible window is
+    /// populated. Lines absent from the map render plain.
     pub by_line: Arc<HashMap<u32, Vec<RunWithText>>>,
-    /// Buffer-line range the producer styled this frame. Engine reads this
-    /// to detect "we scrolled past what was styled" and falls back to plain
-    /// for those rows until the producer catches up next frame.
-    pub covered: Range<u32>,
 }
 
 impl LineStyles {
-    pub fn new(by_line: HashMap<u32, Vec<RunWithText>>, covered: Range<u32>) -> Self {
+    pub fn new(by_line: HashMap<u32, Vec<RunWithText>>) -> Self {
         Self {
             by_line: Arc::new(by_line),
-            covered,
         }
     }
 

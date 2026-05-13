@@ -20,14 +20,12 @@ use super::layout::DisplayLayout;
 #[reflect(Component, Default)]
 pub struct TextViewOverlays {
     pub rects: Vec<RectOverlay>,
-    pub version: u64,
 }
 
 impl TextViewOverlays {
     /// Reset for a fresh frame. Call once at the start of `OverlaySet`.
     pub fn clear(&mut self) {
         self.rects.clear();
-        self.version = self.version.wrapping_add(1);
     }
 }
 
