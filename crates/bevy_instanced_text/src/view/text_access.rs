@@ -13,11 +13,11 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use super::font::MonoCellWidth;
-use super::layout::DisplayLayout;
-use super::snapshot::{LineShape, ShapedGlyph, ShapedLine, StyleRun};
-use super::state::{ContentMetrics, SmoothScroll, TextBuffer, TextContent};
+use super::pipeline::DisplayLayout;
+use super::glyph::{LineShape, ShapedGlyph, ShapedLine, StyleRun};
+use super::text::{ContentMetrics, SmoothScroll, TextBuffer, TextContent};
 use bevy::ui::ScrollPosition;
-use super::styling::{HiddenLines, LineStyles, RunWithText, TextBounds};
+use super::text_style::{HiddenLines, LineStyles, RunWithText, TextBounds};
 use bevy::ui::ComputedNode;
 use crate::gpu::GlyphAtlas;
 
@@ -133,7 +133,7 @@ pub fn produce_layouts<T: TextContent + Component>(
             Option<&HiddenLines>,
             Option<&LineStyles>,
             Option<&TextBounds>,
-            Option<&super::tuning::LayoutTuning>,
+            Option<&super::measurement::LayoutTuning>,
         ),
     >,
     mut atlas: ResMut<GlyphAtlas>,
@@ -787,7 +787,7 @@ mod tests {
 
         let entity = world
             .spawn((
-                TextBuffer::new(crate::view::state::TextSpan::new(
+                TextBuffer::new(crate::view::text::TextSpan::new(
                     "hello world\nsecond line\nthird line\n",
                 )),
                 bevy::ui::ScrollPosition::default(),
@@ -799,12 +799,12 @@ mod tests {
                 bevy::text::LineHeight::Px(test_line_height()),
                 DisplayLayout::default(),
                 TextBounds::default(),
-                crate::view::tuning::LayoutTuning::default(),
+                crate::view::measurement::LayoutTuning::default(),
             ))
             .id();
 
         world
-            .run_system_once(produce_layouts::<crate::view::state::TextSpan>)
+            .run_system_once(produce_layouts::<crate::view::text::TextSpan>)
             .unwrap();
         let lines1 = world.get::<DisplayLayout>(entity).unwrap().lines.len();
         assert_eq!(lines1, 4, "initial layout: 4 rows");
@@ -812,15 +812,15 @@ mod tests {
         // Mimic the edit: replace buffer contents via DerefMut.
         {
             let mut buf = world
-                .get_mut::<TextBuffer<crate::view::state::TextSpan>>(entity)
+                .get_mut::<TextBuffer<crate::view::text::TextSpan>>(entity)
                 .unwrap();
-            buf.0 = crate::view::state::TextSpan::new(
+            buf.0 = crate::view::text::TextSpan::new(
                 "hello\n world\nsecond line\nthird line\n",
             );
         }
 
         world
-            .run_system_once(produce_layouts::<crate::view::state::TextSpan>)
+            .run_system_once(produce_layouts::<crate::view::text::TextSpan>)
             .unwrap();
         let layout2 = world.get::<DisplayLayout>(entity).unwrap();
         assert_eq!(

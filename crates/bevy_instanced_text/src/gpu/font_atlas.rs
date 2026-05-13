@@ -68,7 +68,7 @@ pub struct GlyphAtlas {
     /// every scroll-driven layout rebuild dominates frame time. Identical
     /// (text, font_size, font_id) tuples produce identical shapes, so a
     /// content-hash cache turns scrolling into a series of hash hits.
-    shape_cache: HashMap<u64, Arc<crate::view::snapshot::LineShape>>,
+    shape_cache: HashMap<u64, Arc<crate::view::glyph::LineShape>>,
     /// FIFO insertion order so we can cap `shape_cache` at `SHAPE_CACHE_CAPACITY`
     /// without an LRU. Workload is "scroll past lines once" — recency vs.
     /// frequency doesn't matter much at this size.
@@ -422,7 +422,7 @@ mod instanced_extensions {
             text: &str,
             font_size: f32,
             font_id: Option<cosmic_text::fontdb::ID>,
-        ) -> crate::view::snapshot::LineShape {
+        ) -> crate::view::glyph::LineShape {
             self.shape_line_styled(text, font_size, font_id, false, false)
         }
 
@@ -433,8 +433,8 @@ mod instanced_extensions {
             font_id: Option<cosmic_text::fontdb::ID>,
             bold: bool,
             italic: bool,
-        ) -> crate::view::snapshot::LineShape {
-            use crate::view::snapshot::{LineShape, ShapedGlyph};
+        ) -> crate::view::glyph::LineShape {
+            use crate::view::glyph::{LineShape, ShapedGlyph};
 
             let pinned = font_id;
 

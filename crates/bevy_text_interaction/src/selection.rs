@@ -12,7 +12,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use bevy::reflect::Reflect;
 use bevy_instanced_text::TextContent;
 
-use crate::anchor::{Anchor, AnchorSet, TextEdit};
+use crate::text_edit::{Anchor, AnchorSet, TextEdit};
 
 /// Default semantic-boundary characters: word breakers + brackets + quotes.
 /// Matches the alacritty default and is a sensible cross-domain choice

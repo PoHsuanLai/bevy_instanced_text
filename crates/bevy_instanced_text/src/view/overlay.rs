@@ -11,7 +11,7 @@
 use bevy::prelude::*;
 use std::ops::Range;
 
-use super::layout::DisplayLayout;
+use super::pipeline::DisplayLayout;
 
 /// Per-entity list of decoration rectangles painted over the text (cursors,
 /// selections, bracket highlights, line bands). Cleared and rebuilt each frame
@@ -49,7 +49,7 @@ impl TextViewOverlays {
 /// guides, gutter bars). Overlays go through the engine's instanced
 /// batch in the same draw call as glyphs, share its atlas, and use the
 /// engine's row-anchor convention by definition — they can't drift.
-/// Reach for [`super::anchor::RowMetrics`] only when the decoration
+/// Reach for [`super::bounds::RowMetrics`] only when the decoration
 /// genuinely can't be a rect (custom mesh, popup, Bevy UI node).
 #[derive(Clone, Debug, Reflect)]
 #[reflect(Debug)]

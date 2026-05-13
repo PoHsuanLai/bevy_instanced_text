@@ -14,15 +14,15 @@ use bevy::math::Affine2;
 use bevy::ui::{ui_transform::UiGlobalTransform, CalculatedClip, ComputedNode, ComputedUiTargetCamera, IsDefaultUiCamera, UiSystems};
 
 use super::font::{MonoCellWidth, MonoFontFaces};
-use super::layout::DisplayLayout;
-use super::layout_builder::{produce_layouts, LayoutProduceSet};
+use super::pipeline::DisplayLayout;
+use super::text_access::{produce_layouts, LayoutProduceSet};
 use super::overlay::TextViewOverlays;
 use super::render::{render_layout, BatchTransform, GlyphBatchComponent, TextViewBatch};
-use super::state::{CompositeStops, ContentMetrics, ScrollAnimation, SmoothScroll, TextBuffer, TextContent};
+use super::text::{CompositeStops, ContentMetrics, ScrollAnimation, SmoothScroll, TextBuffer, TextContent};
 use bevy::ui::ScrollPosition;
-use super::styling::TextBounds;
-use super::theme::{TextBackgroundColor, TextColor};
-use super::tuning::LayoutTuning;
+use super::text_style::TextBounds;
+use super::color::{TextBackgroundColor, TextColor};
+use super::measurement::LayoutTuning;
 use crate::gpu::{atlas_ready, GlyphAtlas, GlyphAtlasPlugin, InstancedTextRenderPlugin};
 
 /// Contains `update_text_views`. Order downstream `.after(TextViewRenderSet)`.
@@ -76,9 +76,9 @@ impl<T: TextContent + Component> Plugin for TextContentPlugin<T> {
         app.world_mut()
             .register_required_components::<TextBuffer<T>, TextBounds>();
         app.world_mut()
-            .register_required_components::<TextBuffer<T>, super::styling::LineStyles>();
+            .register_required_components::<TextBuffer<T>, super::text_style::LineStyles>();
         app.world_mut()
-            .register_required_components::<TextBuffer<T>, super::styling::HiddenLines>();
+            .register_required_components::<TextBuffer<T>, super::text_style::HiddenLines>();
         app.world_mut()
             .register_required_components::<TextBuffer<T>, LayoutTuning>();
         app.world_mut()
@@ -124,9 +124,9 @@ impl Plugin for InstancedTextPlugin {
             .register_type::<SmoothScroll>()
             .register_type::<ContentMetrics>();
 
-        app.register_type::<super::state::TextSpan>();
+        app.register_type::<super::text::TextSpan>();
         // Register the TextSpan content type so simple labels work out of the box.
-        app.add_plugins(TextContentPlugin::<super::state::TextSpan>::default());
+        app.add_plugins(TextContentPlugin::<super::text::TextSpan>::default());
 
         app.add_systems(
             PostUpdate,

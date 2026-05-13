@@ -8,7 +8,7 @@ use bevy::prelude::*;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use super::snapshot::StyleRun;
+use super::glyph::StyleRun;
 
 /// Optional Component on a `TextView` entity selecting which buffer lines
 /// the engine renders. Absent ⇒ every line is visible.

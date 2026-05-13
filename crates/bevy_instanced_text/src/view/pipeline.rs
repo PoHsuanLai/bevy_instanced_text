@@ -4,7 +4,7 @@ use bevy::prelude::*;
 use std::ops::Range;
 use std::sync::Arc;
 
-use super::snapshot::ShapedLine;
+use super::glyph::ShapedLine;
 
 /// Per-entity rendering snapshot. Written by `display_map::build_display_layout`
 /// (or `trivial_layout`); read-only for the renderer.

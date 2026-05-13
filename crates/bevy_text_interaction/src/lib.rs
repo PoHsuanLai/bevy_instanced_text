@@ -30,26 +30,26 @@
 //! [`on_pointer_scroll`], [`on_focused_keyboard`] are generic over the
 //! content type and registered by [`InstancedTextInteractionPlugin<T>`].
 
-pub mod anchor;
+pub mod text_edit;
 pub mod clipboard;
-pub mod components;
-pub mod cursor_settings;
-pub mod interaction;
+pub mod interaction_states;
+pub mod cursor;
+pub mod focus;
 pub mod key_repeat;
 pub mod plugin;
 pub mod selection;
-pub mod state;
-pub mod theme;
+pub mod text_state;
+pub mod color;
 
-pub use anchor::{Anchor, AnchorBias, AnchorSet, TextEdit};
+pub use text_edit::{Anchor, AnchorBias, AnchorSet, TextEdit};
 #[cfg(feature = "arboard")]
 pub use clipboard::SystemClipboard;
 #[cfg(feature = "clipboard-wasm")]
 pub use clipboard::WasmClipboard;
 pub use clipboard::{ClipboardProvider, ClipboardResource, NullClipboard};
-pub use components::{ScrollConfig, TextViewDragState};
-pub use cursor_settings::{caret_overlay, cursor_blink_visible, BlinkPhase, CursorSettings, CursorStyle};
-pub use interaction::{
+pub use interaction_states::{ScrollConfig, TextViewDragState};
+pub use cursor::{caret_overlay, cursor_blink_visible, BlinkPhase, CursorSettings, CursorStyle};
+pub use focus::{
     copy_selection, on_focused_keyboard, on_pointer_drag, on_pointer_press, on_pointer_release,
     on_pointer_scroll, screen_to_char_pos, selection_text, InteractionSettings,
 };
@@ -58,8 +58,8 @@ pub use plugin::InstancedTextInteractionPlugin;
 pub use selection::{
     Selection, SelectionCollection, SelectionMode, DEFAULT_SEMANTIC_ESCAPE_CHARS,
 };
-pub use state::{CursorState, SelectionState};
-pub use theme::{TextCursorColor, TextSelectionColor};
+pub use text_state::{CursorState, SelectionState};
+pub use color::{TextCursorColor, TextSelectionColor};
 
 pub mod prelude {
     //! Common types for spawning interactive text views.

@@ -14,8 +14,8 @@
 //! # use bevy::prelude::*;
 //! # use bevy_instanced_text::prelude::*;
 //! # use bevy_instanced_text::{MonoCellWidth, resolve_line_height, SmoothScroll};
-//! # use bevy_instanced_text::view::layout::DisplayLayout;
-//! # use bevy_instanced_text::view::anchor::row_metrics;
+//! # use bevy_instanced_text::view::pipeline::DisplayLayout;
+//! # use bevy_instanced_text::view::bounds::row_metrics;
 //! fn position_my_popup(
 //!     editor: Query<(
 //!         &ComputedNode,
@@ -40,7 +40,7 @@ use bevy::math::{Rect, Vec2};
 use bevy::ui::ComputedNode;
 
 use super::font::MonoCellWidth;
-use super::state::SmoothScroll;
+use super::text::SmoothScroll;
 use bevy::text::TextFont;
 use bevy::ui::ScrollPosition;
 
@@ -238,7 +238,7 @@ pub struct RowMetricsParam<'w, 's> {
             &'static TextFont,
             &'static bevy::text::LineHeight,
             &'static MonoCellWidth,
-            Option<&'static super::layout::DisplayLayout>,
+            Option<&'static super::pipeline::DisplayLayout>,
         ),
     >,
 }
@@ -386,7 +386,7 @@ mod tests {
     #[test]
     fn system_param_matches_direct_call() {
         use crate::view::font::MonoCellWidth;
-        use crate::view::layout::DisplayLayout;
+        use crate::view::pipeline::DisplayLayout;
         use bevy::ecs::system::RunSystemOnce;
         use bevy::prelude::*;
 

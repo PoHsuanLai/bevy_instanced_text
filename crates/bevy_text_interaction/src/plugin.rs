@@ -12,8 +12,8 @@ use bevy::picking::DefaultPickingPlugins;
 use bevy::prelude::*;
 use bevy_instanced_text::TextContent;
 
-use crate::components::{ScrollConfig, TextViewDragState};
-use crate::interaction::{
+use crate::interaction_states::{ScrollConfig, TextViewDragState};
+use crate::focus::{
     on_focused_keyboard, on_pointer_drag, on_pointer_press, on_pointer_release, on_pointer_scroll,
 };
 
@@ -39,11 +39,11 @@ impl<T: TextContent + Component> Plugin for InstancedTextInteractionPlugin<T> {
 
         app.register_type::<ScrollConfig>()
             .register_type::<TextViewDragState>()
-            .register_type::<crate::interaction::InteractionSettings>()
-            .register_type::<crate::cursor_settings::CursorSettings>()
-            .register_type::<crate::cursor_settings::CursorStyle>()
-            .register_type::<crate::theme::TextCursorColor>()
-            .register_type::<crate::theme::TextSelectionColor>();
+            .register_type::<crate::focus::InteractionSettings>()
+            .register_type::<crate::cursor::CursorSettings>()
+            .register_type::<crate::cursor::CursorStyle>()
+            .register_type::<crate::color::TextCursorColor>()
+            .register_type::<crate::color::TextSelectionColor>();
 
         // Default clipboard backend; embedders override by inserting their own
         // `ClipboardResource` before plugin setup.

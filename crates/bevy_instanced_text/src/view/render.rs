@@ -14,9 +14,9 @@ use bevy::prelude::*;
 use crate::gpu::GlyphAtlas;
 
 use super::font::FontSynthesis;
-use super::layout::{line_x_at_byte, DisplayLayout};
+use super::pipeline::{line_x_at_byte, DisplayLayout};
 use super::overlay::TextViewOverlays;
-use super::snapshot::{ShapedLine, StyleRun, TextDecoration};
+use super::glyph::{ShapedLine, StyleRun, TextDecoration};
 use bevy::ui::ComputedNode;
 
 /// Resolved font faces for one render call. The renderer picks per-run
@@ -254,13 +254,8 @@ pub fn render_layout(
                 .filter(|r| r.bg == Some(bg))
                 .map(|r| r.corner_radius)
                 .fold(0.0_f32, f32::max);
-            // Centered on `line.y_top` — preserves legacy anchoring; the
-            // half-row vertical offset is a latent bug tracked separately.
             below_instances.push(GlyphInstance {
-                position: Vec2::new(
-                    margin + bg_x_start,
-                    line.y_top - line_height * 0.5,
-                ),
+                position: Vec2::new(margin + bg_x_start, line.y_top),
                 uv_min: atlas.solid_uv.uv_min,
                 uv_max: atlas.solid_uv.uv_max,
                 size: Vec2::new(
@@ -535,7 +530,7 @@ fn push_glyph(
 /// Emit glyphs whose `byte_index` lies inside `range` from a pre-shaped line.
 /// `glyphs[i].x` is line-local; `glyph_quad` adds the row anchor.
 fn emit_shaped_run_glyphs(
-    glyphs: &[super::snapshot::ShapedGlyph],
+    glyphs: &[super::glyph::ShapedGlyph],
     range: std::ops::Range<usize>,
     anchor: RowAnchor,
     style: RunStyle,
@@ -616,7 +611,7 @@ fn emit_run_with_bg(
     run_face: Option<cosmic_text::fontdb::ID>,
     bold: bool,
     italic: bool,
-    shape_usable: Option<&Arc<super::snapshot::LineShape>>,
+    shape_usable: Option<&Arc<super::glyph::LineShape>>,
     below: &mut Vec<GlyphInstance>,
     text: &mut Vec<GlyphInstance>,
 ) {
@@ -670,7 +665,7 @@ fn emit_run_glyphs_only(
     run_face: Option<cosmic_text::fontdb::ID>,
     bold: bool,
     italic: bool,
-    shape_usable: Option<&Arc<super::snapshot::LineShape>>,
+    shape_usable: Option<&Arc<super::glyph::LineShape>>,
     out: &mut Vec<GlyphInstance>,
 ) {
     if let Some(shape) = shape_usable {
@@ -786,8 +781,6 @@ fn push_overlay_quad(
     };
 
     let node_x = line_start_x + line.x_offset + x0;
-    // Centered on `line.y_top + y_off` — preserves legacy overlay
-    // anchoring; the half-height offset is a latent bug tracked separately.
     let node_y = line.y_top + y_off - height * 0.5;
 
     out.push(GlyphInstance {

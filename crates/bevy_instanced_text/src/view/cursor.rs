@@ -38,10 +38,10 @@ use bevy::ui::ComputedNode;
 
 use std::marker::PhantomData;
 
-use super::anchor::{row_metrics_with_baseline, RowMetrics, DEFAULT_BASELINE_OFFSET_RATIO};
+use super::bounds::{row_metrics_with_baseline, RowMetrics, DEFAULT_BASELINE_OFFSET_RATIO};
 use super::font::MonoCellWidth;
-use super::layout::DisplayLayout;
-use super::state::{SmoothScroll, TextBuffer, TextContent};
+use super::pipeline::DisplayLayout;
+use super::text::{SmoothScroll, TextBuffer, TextContent};
 use bevy::ui::ScrollPosition;
 use bevy::text::TextFont;
 use bevy::ecs::component::Component;
@@ -98,7 +98,7 @@ type BufferAnchorQuery<'w, 's, T> = Query<
 >;
 
 #[derive(SystemParam)]
-pub struct BufferAnchorParam<'w, 's, T: TextContent + Component = super::state::TextSpan> {
+pub struct BufferAnchorParam<'w, 's, T: TextContent + Component = super::text::TextSpan> {
     query: BufferAnchorQuery<'w, 's, T>,
     _phantom: PhantomData<&'w T>,
 }
@@ -217,8 +217,8 @@ fn resolve_display_row_and_x(
 mod tests {
     use super::*;
     use crate::view::font::MonoCellWidth;
-    use crate::view::layout::DisplayLayout;
-    use crate::view::state::SmoothScroll;
+    use crate::view::pipeline::DisplayLayout;
+    use crate::view::text::SmoothScroll;
     use bevy::asset::Handle;
     use bevy::ecs::system::RunSystemOnce;
     use bevy::math::Vec2;
@@ -240,7 +240,7 @@ mod tests {
         let font = bevy::text::TextFont::from_font_size(14.0);
         let line_height = bevy::text::LineHeight::Px(21.0);
         let mono = MonoCellWidth { px: 8.4 };
-        let buffer = TextBuffer::new(super::super::state::TextSpan::new(
+        let buffer = TextBuffer::new(super::super::text::TextSpan::new(
             "hello world\nsecond line\nthird",
         ));
         let mut layout = DisplayLayout::default();
@@ -260,7 +260,7 @@ mod tests {
     fn buffer_pos_and_char_index_agree() {
         let (mut world, entity) = make_editor_world();
         let (a, b) = world
-            .run_system_once(move |anchors: BufferAnchorParam<super::super::state::TextSpan>| {
+            .run_system_once(move |anchors: BufferAnchorParam<super::super::text::TextSpan>| {
                 let a = anchors.at_buffer_pos(entity, 1, 3).unwrap();
                 // "hello world\n" = 12 chars, "sec" = 3 → char_index 15.
                 let b = anchors.at_char_index(entity, 15).unwrap();
@@ -285,13 +285,13 @@ mod tests {
         let font = bevy::text::TextFont::from_font_size(14.0);
         let line_height = bevy::text::LineHeight::Px(21.0);
         let mono = MonoCellWidth { px: 8.4 };
-        let buffer = TextBuffer::new(super::super::state::TextSpan::new("plain text"));
+        let buffer = TextBuffer::new(super::super::text::TextSpan::new("plain text"));
 
         let mut world = World::new();
         let entity = world.spawn((computed, scroll_pos, smooth, font, line_height, mono, buffer)).id();
 
         let anchor = world
-            .run_system_once(move |anchors: BufferAnchorParam<super::super::state::TextSpan>| {
+            .run_system_once(move |anchors: BufferAnchorParam<super::super::text::TextSpan>| {
                 anchors.at_buffer_pos(entity, 0, 5).unwrap()
             })
             .unwrap();
@@ -307,7 +307,7 @@ mod tests {
     fn top_left_matches_legacy_cursor_screen_pos() {
         let (mut world, entity) = make_editor_world();
         let anchor = world
-            .run_system_once(move |anchors: BufferAnchorParam<super::super::state::TextSpan>| {
+            .run_system_once(move |anchors: BufferAnchorParam<super::super::text::TextSpan>| {
                 anchors.at_buffer_pos(entity, 1, 3).unwrap()
             })
             .unwrap();
@@ -330,7 +330,7 @@ mod tests {
     fn top_left_matches_row_metrics() {
         let (mut world, entity) = make_editor_world();
         let anchor = world
-            .run_system_once(move |anchors: BufferAnchorParam<super::super::state::TextSpan>| {
+            .run_system_once(move |anchors: BufferAnchorParam<super::super::text::TextSpan>| {
                 anchors.at_buffer_pos(entity, 2, 4).unwrap()
             })
             .unwrap();

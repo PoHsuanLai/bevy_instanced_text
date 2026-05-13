@@ -25,8 +25,8 @@ use bevy_instanced_text::{
     ContentMetrics, DisplayLayout, MonoCellWidth, SmoothScroll, TextBuffer, TextContent,
 };
 
-use crate::components::{ScrollConfig, TextViewDragState};
-use crate::state::{CursorState, SelectionState};
+use crate::interaction_states::{ScrollConfig, TextViewDragState};
+use crate::text_state::{CursorState, SelectionState};
 
 type ScrollQuery<'w, 's, T> = Query<
     'w,

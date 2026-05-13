@@ -1,24 +1,24 @@
 //! View primitives: generic text state, paint-ready layout, overlays, renderer.
 
-pub mod anchor;
-pub mod buffer_anchor;
+pub mod bounds;
+pub mod cursor;
 pub mod font;
-pub mod layout;
-pub mod layout_builder;
+pub mod pipeline;
+pub mod text_access;
 pub mod overlay;
 pub mod plugin;
 pub mod render;
-pub mod snapshot;
-pub mod state;
-pub mod styling;
-pub mod theme;
-pub mod tuning;
+pub mod glyph;
+pub mod text;
+pub mod text_style;
+pub mod color;
+pub mod measurement;
 
-pub use anchor::{row_metrics, row_metrics_with_baseline, RowMetrics, RowMetricsParam};
-pub use buffer_anchor::{AnchorPoint, BufferAnchorParam};
+pub use bounds::{row_metrics, row_metrics_with_baseline, RowMetrics, RowMetricsParam};
+pub use cursor::{AnchorPoint, BufferAnchorParam};
 pub use font::{FontSynthesis, MonoCellWidth, MonoFontFaces, resolve_line_height};
-pub use layout::DisplayLayout;
-pub use layout_builder::{visible_buffer_range, LayoutProduceSet};
+pub use pipeline::DisplayLayout;
+pub use text_access::{visible_buffer_range, LayoutProduceSet};
 
 pub use overlay::{
     for_each_row_in_buffer_span, CornerRadii, RectOverlay, RowPosition, RowVertical,
@@ -29,7 +29,7 @@ pub use plugin::{
     TextViewRenderSet,
 };
 pub use render::{BatchTransform, GlyphBatchComponent, GlyphInstance};
-pub use snapshot::{ShapedLine, StyleRun, TextDecoration};
-pub use state::{ContentMetrics, SmoothScroll, TextBuffer, TextContent, TextSpan};
-pub use styling::{HiddenLines, LineStyles, RunWithText, TextBounds};
-pub use theme::{TextBackgroundColor, TextColor};
+pub use glyph::{ShapedLine, StyleRun, TextDecoration};
+pub use text::{ContentMetrics, SmoothScroll, TextBuffer, TextContent, TextSpan};
+pub use text_style::{HiddenLines, LineStyles, RunWithText, TextBounds};
+pub use color::{TextBackgroundColor, TextColor};
