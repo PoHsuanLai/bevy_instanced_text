@@ -2,7 +2,7 @@
 //!
 //! Background and foreground belong to the rendering substrate: a terminal
 //! wants them, a markdown viewer wants them, the editor wants them. Cursor
-//! and selection colors live on `bevy_instanced_text_edit` (edit-tier);
+//! and selection colors live on `bevy_text_interaction` (interaction-tier);
 //! line-numbers / brackets / indent-guides live on the editor crate
 //! (editor-tier).
 
