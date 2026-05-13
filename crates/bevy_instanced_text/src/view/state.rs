@@ -1,19 +1,19 @@
 //! TextContent trait, generic TextBuffer<T>, scroll state, and content metrics.
 
 use std::borrow::Cow;
-use std::ops::{Deref, DerefMut};
+use std::ops::{Deref, DerefMut, Range};
 
 use bevy::prelude::*;
 
-/// Minimum interface the layout engine needs from a text buffer.
+/// Minimum interface the layout engine and picking observers need from a
+/// text buffer.
 ///
 /// Implement this on any type to use it as the backing store for a
-/// [`TextBuffer`]. The engine calls only these three methods during
-/// layout — everything else (rope edits, cursor math, LSP position
-/// mapping) stays in the crate that owns the concrete type.
-///
-/// A built-in impl for [`String`] is provided so label / DAW / HUD use
-/// cases work without any extra dependencies.
+/// [`TextBuffer`]. The engine calls the three required methods during
+/// layout; the four default-implemented methods support hit-testing and
+/// selection by rendering-layer observers. A rope-backed type should
+/// override the defaults for O(log n) indexing — `String` / [`TextSpan`]
+/// fall back to per-line scans, which is fine for short content.
 pub trait TextContent: Send + Sync + 'static {
     /// Total number of lines, including a trailing empty line when the
     /// content ends with `\n` (matching ropey's `len_lines()` convention).
@@ -22,6 +22,68 @@ pub trait TextContent: Send + Sync + 'static {
     fn line(&self, i: usize) -> Cow<'_, str>;
     /// Character count of line `i`, excluding the trailing `\n`.
     fn line_len_chars(&self, i: usize) -> usize;
+
+    /// Total character count across all lines (including trailing `\n` chars).
+    fn char_count(&self) -> usize {
+        (0..self.line_count())
+            .map(|i| self.line(i).chars().count())
+            .sum()
+    }
+
+    /// Char offset where line `line` begins. `line == line_count()` returns
+    /// the total char count (one-past-the-end convention).
+    fn line_to_char(&self, line: usize) -> usize {
+        let n = self.line_count();
+        let upper = line.min(n);
+        (0..upper).map(|i| self.line(i).chars().count()).sum()
+    }
+
+    /// Line that contains char offset `ch`. Returns the last line index
+    /// when `ch >= char_count()`.
+    fn char_to_line(&self, ch: usize) -> usize {
+        let mut acc = 0usize;
+        let n = self.line_count();
+        for i in 0..n {
+            let len = self.line(i).chars().count();
+            if ch < acc + len {
+                return i;
+            }
+            acc += len;
+        }
+        n.saturating_sub(1)
+    }
+
+    /// Char range as a string. Default impl walks lines and concatenates
+    /// the relevant character slice — O(range_len) plus O(line_count) line
+    /// walking. Rope-backed implementations should override.
+    fn slice_chars(&self, range: Range<usize>) -> Cow<'_, str> {
+        let total = self.char_count();
+        let start = range.start.min(total);
+        let end = range.end.min(total).max(start);
+        if start == end {
+            return Cow::Owned(String::new());
+        }
+        let mut out = String::with_capacity(end - start);
+        let mut acc = 0usize;
+        for i in 0..self.line_count() {
+            let line = self.line(i);
+            let len = line.chars().count();
+            let line_end = acc + len;
+            if line_end <= start {
+                acc = line_end;
+                continue;
+            }
+            if acc >= end {
+                break;
+            }
+            let local_start = start.saturating_sub(acc);
+            let local_end = (end - acc).min(len);
+            let s: String = line.chars().skip(local_start).take(local_end - local_start).collect();
+            out.push_str(&s);
+            acc = line_end;
+        }
+        Cow::Owned(out)
+    }
 }
 
 /// A simple string-backed [`TextContent`] for labels, HUD values, DAW track
