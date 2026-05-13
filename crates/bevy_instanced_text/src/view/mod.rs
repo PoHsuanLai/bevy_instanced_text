@@ -1,6 +1,7 @@
 //! View primitives: generic text state, paint-ready layout, overlays, renderer.
 
 pub mod anchor;
+pub mod buffer_anchor;
 pub mod font;
 pub mod layout;
 pub mod layout_builder;
@@ -14,6 +15,7 @@ pub mod theme;
 pub mod tuning;
 
 pub use anchor::{row_metrics, row_metrics_with_baseline, RowMetrics, RowMetricsParam};
+pub use buffer_anchor::{AnchorPoint, BufferAnchorParam};
 pub use font::{FontSynthesis, MonoCellWidth, MonoFontFaces, resolve_line_height};
 pub use layout::DisplayLayout;
 pub use layout_builder::{visible_buffer_range, LayoutProduceSet};

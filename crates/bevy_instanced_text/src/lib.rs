@@ -114,10 +114,11 @@ pub mod prelude {
     //! Common types for spawning and rendering text views.
     pub use crate::gpu::{GlyphAtlasPlugin, InstancedTextRenderPlugin};
     pub use crate::view::{
-        row_metrics, row_metrics_with_baseline, ContentMetrics, CornerRadii, DisplayLayout,
-        FontSynthesis, HiddenLines, InstancedTextPlugin, InstancedTextPlugins, LineStyles,
-        MonoCellWidth, MonoFontFaces, RectOverlay, RowMetrics, RowMetricsParam, RowVertical,
-        RunWithText, SmoothScroll, StyleRun, TextBackgroundColor, TextBounds, TextBuffer,
-        TextColor, TextContent, TextContentPlugin, TextSpan, TextViewOverlays,
+        resolve_line_height, row_metrics, row_metrics_with_baseline, AnchorPoint,
+        BufferAnchorParam, ContentMetrics, CornerRadii, DisplayLayout, FontSynthesis, HiddenLines,
+        InstancedTextPlugin, InstancedTextPlugins, LineStyles, MonoCellWidth, MonoFontFaces,
+        RectOverlay, RowMetrics, RowMetricsParam, RowVertical, RunWithText, SmoothScroll, StyleRun,
+        TextBackgroundColor, TextBounds, TextBuffer, TextColor, TextContent, TextContentPlugin,
+        TextSpan, TextViewOverlays,
     };
 }

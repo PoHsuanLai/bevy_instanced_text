@@ -36,12 +36,15 @@ use bevy::math::Vec2;
 
 use bevy::ui::ComputedNode;
 
+use std::marker::PhantomData;
+
 use super::anchor::{row_metrics_with_baseline, RowMetrics, DEFAULT_BASELINE_OFFSET_RATIO};
 use super::font::MonoCellWidth;
 use super::layout::DisplayLayout;
-use super::state::{SmoothScroll, TextBuffer};
+use super::state::{SmoothScroll, TextBuffer, TextContent};
 use bevy::ui::ScrollPosition;
 use bevy::text::TextFont;
+use bevy::ecs::component::Component;
 
 /// Resolved coordinates for a buffer position, in node-local logical
 /// pixels (top-left origin, +Y down) — the same space `Node::top` /
@@ -74,10 +77,11 @@ pub struct AnchorPoint {
     pub on_screen: bool,
 }
 
-/// `SystemParam` resolving `(line, character)` or rope `char_index` to
-/// an [`AnchorPoint`]. Falls back to monospace pixel-x when no layout
-/// is attached.
-type BufferAnchorQuery<'w, 's> = Query<
+/// `SystemParam` resolving `(line, character)` or char-index to an
+/// [`AnchorPoint`]. Generic over the buffer's [`TextContent`] so
+/// terminals, labels, and rope-backed editors share one anchor lookup.
+/// Falls back to monospace pixel-x when no layout is attached.
+type BufferAnchorQuery<'w, 's, T> = Query<
     'w,
     's,
     (
@@ -88,17 +92,18 @@ type BufferAnchorQuery<'w, 's> = Query<
         &'static TextFont,
         &'static bevy::text::LineHeight,
         &'static MonoCellWidth,
-        &'static TextBuffer,
+        &'static TextBuffer<T>,
         Option<&'static DisplayLayout>,
     ),
 >;
 
 #[derive(SystemParam)]
-pub struct BufferAnchorParam<'w, 's> {
-    query: BufferAnchorQuery<'w, 's>,
+pub struct BufferAnchorParam<'w, 's, T: TextContent + Component = super::state::TextSpan> {
+    query: BufferAnchorQuery<'w, 's, T>,
+    _phantom: PhantomData<&'w T>,
 }
 
-impl<'w, 's> BufferAnchorParam<'w, 's> {
+impl<'w, 's, T: TextContent + Component> BufferAnchorParam<'w, 's, T> {
     /// Anchor a buffer `(line, character)` on `entity`.
     ///
     /// `character` is a byte offset within the line when a layout is
@@ -115,18 +120,17 @@ impl<'w, 's> BufferAnchorParam<'w, 's> {
         Some(self.build_anchor(computed, line_height, &metrics, display_row, pixel_x))
     }
 
-    /// Anchor a rope-flavored `char_index` (offset within
-    /// `TextBuffer.rope`). Convenient for LSP popups whose state stores
-    /// the trigger position as a rope offset rather than `(line,
-    /// character)`.
-    pub fn at_rope_char_index(&self, entity: Entity, char_index: usize) -> Option<AnchorPoint> {
+    /// Anchor a content `char_index` (char offset within the buffer's
+    /// [`TextContent`]). Convenient for popups whose state stores the
+    /// trigger position as a char offset rather than `(line, character)`.
+    pub fn at_char_index(&self, entity: Entity, char_index: usize) -> Option<AnchorPoint> {
         let (_, computed, scroll_pos, smooth, font, lh, mono, buffer, layout) = self.query.get(entity).ok()?;
         let line_height = crate::view::font::resolve_line_height(*lh, font.font_size);
         let metrics = build_metrics(computed, scroll_pos.y, smooth.horizontal, font, line_height, mono, layout);
 
-        let char_index = char_index.min(buffer.rope.len_chars());
-        let line_index = buffer.rope.char_to_line(char_index);
-        let line_start = buffer.rope.line_to_char(line_index);
+        let char_index = char_index.min(buffer.char_count());
+        let line_index = buffer.char_to_line(char_index);
+        let line_start = buffer.line_to_char(line_index);
         let col_chars = char_index - line_start;
         let byte_in_line = col_chars;
 
@@ -236,7 +240,9 @@ mod tests {
         let font = bevy::text::TextFont::from_font_size(14.0);
         let line_height = bevy::text::LineHeight::Px(21.0);
         let mono = MonoCellWidth { px: 8.4 };
-        let buffer = TextBuffer::new("hello world\nsecond line\nthird");
+        let buffer = TextBuffer::new(super::super::state::TextSpan::new(
+            "hello world\nsecond line\nthird",
+        ));
         let mut layout = DisplayLayout::default();
         layout.baseline_offset = 14.0 * 0.32;
 
@@ -245,19 +251,19 @@ mod tests {
         (world, entity)
     }
 
-    /// `at_buffer_pos` and `at_rope_char_index` should agree when given
+    /// `at_buffer_pos` and `at_char_index` should agree when given
     /// equivalent inputs — same row, same column, same screen coords.
     /// If they drift the two LSP entry points (`(line, character)`
     /// from LSP semantic data, `char_index` from popup state) will
     /// produce visually different popups for the same logical position.
     #[test]
-    fn buffer_pos_and_rope_index_agree() {
+    fn buffer_pos_and_char_index_agree() {
         let (mut world, entity) = make_editor_world();
         let (a, b) = world
-            .run_system_once(move |anchors: BufferAnchorParam| {
+            .run_system_once(move |anchors: BufferAnchorParam<super::super::state::TextSpan>| {
                 let a = anchors.at_buffer_pos(entity, 1, 3).unwrap();
                 // "hello world\n" = 12 chars, "sec" = 3 → char_index 15.
-                let b = anchors.at_rope_char_index(entity, 15).unwrap();
+                let b = anchors.at_char_index(entity, 15).unwrap();
                 (a, b)
             })
             .unwrap();
@@ -279,13 +285,13 @@ mod tests {
         let font = bevy::text::TextFont::from_font_size(14.0);
         let line_height = bevy::text::LineHeight::Px(21.0);
         let mono = MonoCellWidth { px: 8.4 };
-        let buffer = TextBuffer::new("plain text");
+        let buffer = TextBuffer::new(super::super::state::TextSpan::new("plain text"));
 
         let mut world = World::new();
         let entity = world.spawn((computed, scroll_pos, smooth, font, line_height, mono, buffer)).id();
 
         let anchor = world
-            .run_system_once(move |anchors: BufferAnchorParam| {
+            .run_system_once(move |anchors: BufferAnchorParam<super::super::state::TextSpan>| {
                 anchors.at_buffer_pos(entity, 0, 5).unwrap()
             })
             .unwrap();
@@ -301,7 +307,7 @@ mod tests {
     fn top_left_matches_legacy_cursor_screen_pos() {
         let (mut world, entity) = make_editor_world();
         let anchor = world
-            .run_system_once(move |anchors: BufferAnchorParam| {
+            .run_system_once(move |anchors: BufferAnchorParam<super::super::state::TextSpan>| {
                 anchors.at_buffer_pos(entity, 1, 3).unwrap()
             })
             .unwrap();
@@ -324,7 +330,7 @@ mod tests {
     fn top_left_matches_row_metrics() {
         let (mut world, entity) = make_editor_world();
         let anchor = world
-            .run_system_once(move |anchors: BufferAnchorParam| {
+            .run_system_once(move |anchors: BufferAnchorParam<super::super::state::TextSpan>| {
                 anchors.at_buffer_pos(entity, 2, 4).unwrap()
             })
             .unwrap();
