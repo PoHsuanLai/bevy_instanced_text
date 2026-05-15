@@ -238,6 +238,23 @@ fn block_slice<T: TextContent>(content: &T, start: usize, end: usize) -> String 
 /// Pointer scroll observer for text-view entities — handles both vertical
 /// (scroll wheel / two-finger swipe) and horizontal (shift+wheel / two-finger
 /// swipe sideways) scrolling. Generic over content type.
+///
+/// # Per-panel routing
+///
+/// Bevy's picking backend routes [`Pointer<Scroll>`] events to whichever
+/// entity is currently under the cursor, so multi-panel layouts get
+/// per-panel scrolling for free — no need to compare mouse position against
+/// each panel's node bounds. Add [`InstancedTextInteractionPlugin`] (which
+/// installs this observer) and every [`TextBuffer<T>`] entity scrolls
+/// independently when hovered.
+///
+/// Hosts that want different scroll behavior per panel can add their own
+/// [`Pointer<Scroll>`] observer alongside this one — both fire, and the
+/// host's observer can short-circuit by mutating the same
+/// [`ScrollPosition`] component.
+///
+/// [`InstancedTextInteractionPlugin`]: crate::InstancedTextInteractionPlugin
+/// [`TextBuffer<T>`]: bevy_instanced_text::TextBuffer
 pub fn on_pointer_scroll<T: TextContent + Component>(
     trigger: On<Pointer<Scroll>>,
     mut views: ScrollQuery<T>,
