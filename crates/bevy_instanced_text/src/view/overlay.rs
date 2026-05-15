@@ -1,33 +1,26 @@
 //! Paint-time overlays: cursor, selection, line highlights, bracket matches.
 //!
-//! Overlays are decoration the editor (or any consumer) writes *alongside* the
-//! display layout. The renderer reads them during the same pass and emits quads
-//! into the same instance buffer as glyphs (sharing the atlas's `solid_uv`).
-//!
-//! Single-writer rule: each system that produces overlays must `clear()` first
-//! and append, so the rect list rebuilds each frame. Bumping `version` skips
-//! the GPU upload when nothing changed.
+//! Each producer owns a typed component (`TextUnderlays` / `TextOverlays` or a
+//! bevscode-level typed component). The renderer reads the two engine-level
+//! components directly — no shared bag, no z-lane retain/push every frame.
 
 use bevy::prelude::*;
 use std::ops::Range;
 
 use super::pipeline::DisplayLayout;
 
-/// Per-entity list of decoration rectangles painted over the text (cursors,
-/// selections, bracket highlights, line bands). Cleared and rebuilt each frame
-/// by the systems that own each overlay type.
+/// Decoration rects rendered **before** glyphs (selection backgrounds, indent
+/// guides, line-highlight bands). Written by overlay producers; read by the
+/// renderer in the same pass as glyphs.
 #[derive(Component, Default, Clone, Reflect)]
 #[reflect(Component, Default)]
-pub struct TextViewOverlays {
-    pub rects: Vec<RectOverlay>,
-}
+pub struct TextUnderlays(pub Vec<RectOverlay>);
 
-impl TextViewOverlays {
-    /// Reset for a fresh frame. Call once at the start of `OverlaySet`.
-    pub fn clear(&mut self) {
-        self.rects.clear();
-    }
-}
+/// Decoration rects rendered **after** glyphs (carets, bracket boxes, word
+/// highlights). Written by overlay producers; read by the renderer.
+#[derive(Component, Default, Clone, Reflect)]
+#[reflect(Component, Default)]
+pub struct TextOverlays(pub Vec<RectOverlay>);
 
 /// A rectangle drawn anchored to a display row.
 ///
@@ -51,8 +44,8 @@ impl TextViewOverlays {
 /// engine's row-anchor convention by definition — they can't drift.
 /// Reach for [`super::bounds::RowMetrics`] only when the decoration
 /// genuinely can't be a rect (custom mesh, popup, Bevy UI node).
-#[derive(Clone, Debug, Reflect)]
-#[reflect(Debug)]
+#[derive(Clone, Debug, Reflect, PartialEq)]
+#[reflect(Debug, PartialEq)]
 pub struct RectOverlay {
     pub display_row: u32,
     pub x_range: Range<f32>,
@@ -123,8 +116,8 @@ impl CornerRadii {
 }
 
 /// Semantic vertical placement within a row. Resolved to pixels by the renderer.
-#[derive(Clone, Copy, Debug, Reflect)]
-#[reflect(Debug)]
+#[derive(Clone, Copy, Debug, Reflect, PartialEq)]
+#[reflect(Debug, PartialEq)]
 pub enum RowVertical {
     /// Span the row's typographic text band (cap-to-descender). Used
     /// for selection backgrounds and line-highlight bands so the rect

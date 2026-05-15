@@ -1,5 +1,5 @@
 //! Generic text view rendering — produces `GlyphInstance` batches from a
-//! `DisplayLayout` and (optional) `TextViewOverlays`.
+//! `DisplayLayout` plus below/above overlay slices.
 //!
 //! Pure function over an immutable snapshot: no cursors, selections, syntax
 //! highlighting, or other editor concepts here. The producer (`display_map`)
@@ -15,7 +15,7 @@ use crate::gpu::GlyphAtlas;
 
 use super::font::FontSynthesis;
 use super::pipeline::{line_x_at_byte, DisplayLayout};
-use super::overlay::TextViewOverlays;
+use super::overlay::RectOverlay;
 use super::glyph::{ShapedLine, StyleRun, TextDecoration};
 use bevy::ui::ComputedNode;
 
@@ -166,12 +166,13 @@ pub struct RenderContext {
     pub justify: bevy::text::Justify,
 }
 
-/// Render a `DisplayLayout` into glyph instances. Pure function over an immutable
-/// snapshot — folding, wrapping, culling, and styling are already done by the producer.
-/// Overlays via `RectOverlay`: negative-z renders below text, positive-z above.
+/// Render a `DisplayLayout` into glyph instances.
+///
+/// `below` is painted before glyphs (selections, backgrounds); `above` after (carets, brackets).
 pub fn render_layout(
     layout: &DisplayLayout,
-    overlays: Option<&TextViewOverlays>,
+    below: &[RectOverlay],
+    above: &[RectOverlay],
     viewport: &ComputedNode,
     atlas: &mut GlyphAtlas,
     fonts: &bevy::asset::Assets<bevy::text::Font>,
@@ -208,17 +209,15 @@ pub fn render_layout(
     let mut above_instances: Vec<GlyphInstance> = Vec::new();
 
     // Below-text overlays first (selection bg, line highlight)
-    if let Some(ovs) = overlays {
-        for rect in ovs.rects.iter().filter(|r| r.z < 0) {
-            push_overlay_quad(
-                rect,
-                layout,
-                base_line_start_x,
-                logical.x,
-                atlas.solid_uv,
-                &mut below_instances,
-            );
-        }
+    for rect in below {
+        push_overlay_quad(
+            rect,
+            layout,
+            base_line_start_x,
+            logical.x,
+            atlas.solid_uv,
+            &mut below_instances,
+        );
     }
 
     // Glyphs and per-line/per-run backgrounds
@@ -437,18 +436,16 @@ pub fn render_layout(
         }
     }
 
-    // Above-text overlays (carets)
-    if let Some(ovs) = overlays {
-        for rect in ovs.rects.iter().filter(|r| r.z >= 0) {
-            push_overlay_quad(
-                rect,
-                layout,
-                base_line_start_x,
-                logical.x,
-                atlas.solid_uv,
-                &mut above_instances,
-            );
-        }
+    // Above-text overlays (carets, brackets)
+    for rect in above {
+        push_overlay_quad(
+            rect,
+            layout,
+            base_line_start_x,
+            logical.x,
+            atlas.solid_uv,
+            &mut above_instances,
+        );
     }
 
     // Painter's order: below → text → above
