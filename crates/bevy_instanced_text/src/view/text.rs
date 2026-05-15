@@ -184,23 +184,28 @@ impl TextContent for String {
 ///
 /// ```rust,ignore
 /// // Simple label — no rope needed
-/// commands.spawn(TextBuffer::new("Track 1"));
+/// commands.spawn(TextBuffer::<TextSpan>::new("Track 1"));
 ///
 /// // Editor — rope-backed, impl TextContent for Rope in your crate
-/// commands.spawn(TextBuffer::new(my_rope));
+/// commands.spawn(TextBuffer::<RopeBuffer>::new(my_rope));
 /// ```
 #[derive(Component)]
 pub struct TextBuffer<T: TextContent>(pub T);
 
 impl<T: TextContent> TextBuffer<T> {
-    pub fn new(content: T) -> Self {
-        Self(content)
-    }
-}
-
-impl TextBuffer<String> {
-    pub fn from_str(s: &str) -> Self {
-        Self(s.to_owned())
+    /// Construct from anything that can convert into the content type `T`.
+    ///
+    /// When `T` isn't obvious from the argument, use a turbofish:
+    ///
+    /// ```rust,ignore
+    /// // Label: TextSpan: From<&str>, so &str is enough once T is named.
+    /// commands.spawn(TextBuffer::<TextSpan>::new("hello"));
+    ///
+    /// // Editor: pass the rope value directly.
+    /// commands.spawn(TextBuffer::<RopeBuffer>::new(my_rope));
+    /// ```
+    pub fn new(content: impl Into<T>) -> Self {
+        Self(content.into())
     }
 }
 

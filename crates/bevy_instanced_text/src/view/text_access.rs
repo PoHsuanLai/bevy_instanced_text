@@ -699,9 +699,7 @@ mod tests {
 
         let entity = world
             .spawn((
-                TextBuffer::new(crate::view::text::TextSpan::new(
-                    "hello world\nsecond line\nthird line\n",
-                )),
+                TextBuffer::<crate::view::text::TextSpan>::new("hello world\nsecond line\nthird line\n"),
                 bevy::ui::ScrollPosition::default(),
                 ContentMetrics::default(),
                 test_computed(),

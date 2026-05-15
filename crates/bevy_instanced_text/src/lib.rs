@@ -71,7 +71,7 @@
 //!
 //! // Left text view — sized to half the window in logical pixels.
 //! commands.spawn((
-//!     bevy_instanced_text::TextBuffer::new(bevy_instanced_text::TextSpan::new("left pane")),
+//!     bevy_instanced_text::TextBuffer::<bevy_instanced_text::TextSpan>::new("left pane"),
 //!     Node { width: Val::Px(window.width() / 2.0), height: Val::Px(window.height()), ..default() },
 //!     RenderLayers::layer(0),
 //! ));
@@ -93,7 +93,7 @@
 //!         commands.spawn(Camera2d);
 //!         // Text view — size it with Node; padding insets the text area.
 //!         commands.spawn((
-//!             TextBuffer::new(TextSpan::new("hello world")),
+//!             TextBuffer::<TextSpan>::new("hello world"),
 //!             Node {
 //!                 width: Val::Vw(100.0),
 //!                 height: Val::Vh(100.0),

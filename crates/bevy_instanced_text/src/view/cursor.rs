@@ -235,9 +235,7 @@ mod tests {
         let font = bevy::text::TextFont::from_font_size(14.0);
         let line_height = bevy::text::LineHeight::Px(21.0);
         let mono = MonoCellWidth { px: 8.4 };
-        let buffer = TextBuffer::new(super::super::text::TextSpan::new(
-            "hello world\nsecond line\nthird",
-        ));
+        let buffer = TextBuffer::<super::super::text::TextSpan>::new("hello world\nsecond line\nthird");
         let mut layout = DisplayLayout::default();
         layout.baseline_offset = 14.0 * 0.32;
 
@@ -279,7 +277,7 @@ mod tests {
         let font = bevy::text::TextFont::from_font_size(14.0);
         let line_height = bevy::text::LineHeight::Px(21.0);
         let mono = MonoCellWidth { px: 8.4 };
-        let buffer = TextBuffer::new(super::super::text::TextSpan::new("plain text"));
+        let buffer = TextBuffer::<super::super::text::TextSpan>::new("plain text");
 
         let mut world = World::new();
         let entity = world.spawn((computed, scroll, font, line_height, mono, buffer)).id();
