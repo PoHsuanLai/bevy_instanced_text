@@ -22,7 +22,8 @@ use bevy::ui::ui_transform::UiGlobalTransform;
 
 use bevy::ui::ComputedNode;
 use bevy_instanced_text::{
-    ContentMetrics, DisplayLayout, MonoCellWidth, SmoothScroll, TextBuffer, TextContent,
+    ContentMetrics, DisplayLayout, HorizontalScroll, MonoCellWidth, TextBuffer, TextContent,
+    VerticalScroll,
 };
 
 use crate::interaction_states::{ScrollConfig, TextViewDragState};
@@ -33,7 +34,8 @@ type ScrollQuery<'w, 's, T> = Query<
     's,
     (
         &'static TextBuffer<T>,
-        &'static mut SmoothScroll,
+        &'static mut VerticalScroll,
+        &'static mut HorizontalScroll,
         &'static ContentMetrics,
         &'static ComputedNode,
         &'static TextFont,
@@ -50,7 +52,7 @@ type PressQuery<'w, 's, T> = Query<
     (
         &'static mut TextViewDragState,
         &'static TextBuffer<T>,
-        &'static mut SmoothScroll,
+        &'static VerticalScroll,
         &'static TextFont,
         &'static bevy::text::LineHeight,
         &'static MonoCellWidth,
@@ -69,7 +71,7 @@ type DragQuery<'w, 's, T> = Query<
     (
         &'static mut TextViewDragState,
         &'static TextBuffer<T>,
-        &'static mut SmoothScroll,
+        &'static VerticalScroll,
         &'static TextFont,
         &'static bevy::text::LineHeight,
         &'static MonoCellWidth,
@@ -245,7 +247,7 @@ pub fn on_pointer_scroll<T: TextContent + Component>(
     mut views: ScrollQuery<T>,
 ) {
     let entity = trigger.event().entity;
-    let Ok((buffer, mut smooth, metrics, computed, font, lh, mono, scroll_cfg)) =
+    let Ok((buffer, mut v_scroll, mut h_scroll, metrics, computed, font, lh, mono, scroll_cfg)) =
         views.get_mut(entity)
     else {
         return;
@@ -267,7 +269,8 @@ pub fn on_pointer_scroll<T: TextContent + Component>(
 
     let (v_delta_per_dy, h_delta_per_dx) = match unit {
         MouseScrollUnit::Line => (line_height * scroll_cfg.speed, mono.px * scroll_cfg.speed),
-        MouseScrollUnit::Pixel => (scroll_cfg.speed, scroll_cfg.speed),
+        // Pixel-unit deltas are already in logical pixels; no speed multiplier.
+        MouseScrollUnit::Pixel => (1.0, 1.0),
     };
 
     // Horizontal scroll — only when content overflows.
@@ -276,28 +279,19 @@ pub fn on_pointer_scroll<T: TextContent + Component>(
         if metrics.max_content_width > available_text_width {
             let scroll_delta = dx * h_delta_per_dx;
             let max_h = (metrics.max_content_width - available_text_width).max(0.0);
-            if scroll_cfg.smooth {
-                smooth.target_x = (smooth.target_x + scroll_delta).clamp(0.0, max_h);
-            } else {
-                smooth.horizontal = (smooth.horizontal + scroll_delta).clamp(0.0, max_h);
-                smooth.target_x = smooth.horizontal;
-            }
+            // Build on the existing target so successive scroll events stack
+            // monotonically; never on `current`, which is mid-animation.
+            h_scroll.target = (h_scroll.target + scroll_delta).clamp(0.0, max_h);
         }
     }
 
-    // Vertical scroll. scroll_pos.y is positive-downward.
+    // Vertical scroll. Positive = down.
     if dy.abs() > 0.0 {
         let scroll_delta = -dy * v_delta_per_dy;
         let line_count = buffer.line_count();
         let content_height = line_count as f32 * line_height;
         let max_scroll = (content_height - viewport_height + text_area_top).max(0.0);
-        if scroll_cfg.smooth {
-            smooth.target_y = (smooth.target_y + scroll_delta).clamp(0.0, max_scroll);
-        } else {
-            let instant = (smooth.offset_y + scroll_delta).clamp(0.0, max_scroll);
-            smooth.offset_y = instant;
-            smooth.target_y = instant;
-        }
+        v_scroll.target = (v_scroll.target + scroll_delta).clamp(0.0, max_scroll);
     }
 }
 
@@ -320,7 +314,7 @@ pub fn on_pointer_press<T: TextContent + Component>(
     let Ok((
         mut drag_state,
         buffer,
-        mut smooth,
+        v_scroll,
         font,
         lh,
         mono,
@@ -351,7 +345,7 @@ pub fn on_pointer_press<T: TextContent + Component>(
         local_pos,
         &**buffer,
         layout,
-        smooth.offset_y,
+        v_scroll.current,
         mono,
         line_height,
         text_area_left,
@@ -425,7 +419,7 @@ pub fn on_pointer_press<T: TextContent + Component>(
     }
     drag_state.is_dragging = true;
     drag_state.drag_start_pos = Some(char_pos);
-    drag_state.drag_start_scroll_offset = smooth.offset_y;
+    drag_state.drag_start_scroll_offset = v_scroll.current;
     drag_state.last_screen_pos = Some(trigger.event().pointer_location.position);
     input_focus.set(entity);
 }
@@ -472,7 +466,7 @@ pub fn on_pointer_drag<T: TextContent + Component>(
     let Ok((
         mut drag_state,
         buffer,
-        smooth,
+        v_scroll,
         font,
         lh,
         mono,
@@ -508,7 +502,7 @@ pub fn on_pointer_drag<T: TextContent + Component>(
         local_pos,
         &**buffer,
         layout,
-        smooth.offset_y,
+        v_scroll.current,
         mono,
         line_height,
         text_area_left,

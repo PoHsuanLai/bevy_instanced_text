@@ -102,21 +102,29 @@ struct ReleaseObserverRegistered;
 #[derive(Resource)]
 struct InstantScrollRegistered;
 
+/// Sync `ScrollConfig.smooth_scroll_duration` onto each axis's `duration`
+/// field, and (when smooth=false) snap each axis's `current` to its
+/// `target` so the engine animator becomes a no-op.
+///
+/// Vertical and horizontal are handled symmetrically — one helper, two
+/// queries — so a future change to one can't drift from the other.
 fn apply_instant_scroll(
-    mut q: Query<(&mut bevy_instanced_text::SmoothScroll, &ScrollConfig)>,
+    mut v: Query<(&mut bevy_instanced_text::VerticalScroll, &ScrollConfig)>,
+    mut h: Query<(&mut bevy_instanced_text::HorizontalScroll, &ScrollConfig)>,
 ) {
-    for (mut smooth, cfg) in q.iter_mut() {
-        if (smooth.duration - cfg.smooth_scroll_duration).abs() > f32::EPSILON {
-            smooth.duration = cfg.smooth_scroll_duration;
-        }
-        if cfg.smooth {
-            continue;
-        }
-        if (smooth.target_y - smooth.offset_y).abs() > 0.001 {
-            smooth.offset_y = smooth.target_y;
-        }
-        if (smooth.target_x - smooth.horizontal).abs() > 0.001 {
-            smooth.horizontal = smooth.target_x;
-        }
+    for (mut axis, cfg) in v.iter_mut() {
+        sync_axis(&mut axis.0, cfg);
+    }
+    for (mut axis, cfg) in h.iter_mut() {
+        sync_axis(&mut axis.0, cfg);
+    }
+}
+
+fn sync_axis(axis: &mut bevy_instanced_text::ScrollAxis, cfg: &ScrollConfig) {
+    if (axis.duration - cfg.smooth_scroll_duration).abs() > f32::EPSILON {
+        axis.duration = cfg.smooth_scroll_duration;
+    }
+    if !cfg.smooth && (axis.target - axis.current).abs() > 0.001 {
+        axis.current = axis.target;
     }
 }

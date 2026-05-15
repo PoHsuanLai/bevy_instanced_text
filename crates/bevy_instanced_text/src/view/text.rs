@@ -231,36 +231,32 @@ impl<T: TextContent + Default> Default for TextBuffer<T> {
     }
 }
 
-/// Smooth-scroll animation targets and current offsets.
-///
-/// Hosts write `target_y` / `target_x` to request scroll. The engine's
-/// `animate_text_view_scroll` system drives `offset_y` and `horizontal`
-/// toward those targets each frame.
-///
-/// For instant (non-animated) scroll, write both `offset_y` and `target_y`
-/// to the same value (and similarly for horizontal).
-///
-/// Sign convention: positive = down / right.
-#[derive(Component, Default, Reflect)]
-#[reflect(Component, Default)]
-pub struct SmoothScroll {
-    /// Vertical smooth-scroll target in logical pixels, positive = down.
-    pub target_y: f32,
-    /// Horizontal smooth-scroll target in logical pixels, positive = right.
-    pub target_x: f32,
-    /// Current animated vertical offset. Written by the engine; read by
-    /// renderers. Not the same as `target_y` when an animation is in flight.
-    pub offset_y: f32,
-    /// Current animated horizontal offset. Written by the engine; read by
-    /// renderers. Not the same as `target_x` when an animation is in flight.
-    pub horizontal: f32,
-    /// Animation duration in seconds. Synced from `ScrollConfig::smooth_scroll_duration`.
+/// Internal state shared by `VerticalScroll` and `HorizontalScroll`. Hosts
+/// write `target`; the animator advances `current` toward it via `anim`.
+/// Sign convention is axis-dependent: vertical is positive-down, horizontal
+/// positive-right (logical pixels for both).
+#[derive(Default, Clone, Debug, Reflect)]
+pub struct ScrollAxis {
+    /// Host writes this to request a scroll position.
+    pub target: f32,
+    /// Engine-written animated position. Renderers and hit-testing read this.
+    pub current: f32,
+    /// Easing length in seconds. `0.0` = instant. Synced from
+    /// `ScrollConfig::smooth_scroll_duration` by `apply_instant_scroll`.
     pub duration: f32,
     #[reflect(ignore)]
-    pub(crate) vertical_anim: Option<ScrollAnimation>,
-    #[reflect(ignore)]
-    pub(crate) horizontal_anim: Option<ScrollAnimation>,
+    pub(crate) anim: Option<ScrollAnimation>,
 }
+
+/// Vertical smooth-scroll axis. `current` is positive-down logical pixels.
+#[derive(Component, Default, Reflect, Deref, DerefMut)]
+#[reflect(Component, Default)]
+pub struct VerticalScroll(pub ScrollAxis);
+
+/// Horizontal smooth-scroll axis. `current` is positive-right logical pixels.
+#[derive(Component, Default, Reflect, Deref, DerefMut)]
+#[reflect(Component, Default)]
+pub struct HorizontalScroll(pub ScrollAxis);
 
 #[derive(Clone, Debug)]
 pub(crate) struct ScrollAnimation {
@@ -271,6 +267,20 @@ pub(crate) struct ScrollAnimation {
     pub composite: Option<CompositeStops>,
 }
 
+impl ScrollAnimation {
+    /// Advance by `dt` and return `(sampled_value, completed)`. When
+    /// `completed`, callers should drop the anim — the returned value is
+    /// `self.to`.
+    pub(crate) fn advance(&mut self, dt: f32) -> (f32, bool) {
+        self.elapsed += dt;
+        if self.elapsed >= self.duration {
+            (self.to, true)
+        } else {
+            (sample_animation(self), false)
+        }
+    }
+}
+
 /// Two-stage composite curve for jumps > 2.5× viewport; avoids the floaty
 /// tail that a single easeOutCubic produces over large distances.
 #[derive(Clone, Debug)]
@@ -278,6 +288,33 @@ pub(crate) struct CompositeStops {
     pub stop1: f32,
     pub stop2: f32,
     pub split: f32,
+}
+
+#[inline]
+fn ease_out_cubic(t: f32) -> f32 {
+    let inv = 1.0 - t;
+    1.0 - inv * inv * inv
+}
+
+#[inline]
+fn lerp(a: f32, b: f32, t: f32) -> f32 {
+    a + (b - a) * t
+}
+
+fn sample_animation(anim: &ScrollAnimation) -> f32 {
+    let t = (anim.elapsed / anim.duration).clamp(0.0, 1.0);
+    match &anim.composite {
+        None => lerp(anim.from, anim.to, ease_out_cubic(t)),
+        Some(c) => {
+            if t < c.split {
+                let local = t / c.split;
+                lerp(anim.from, c.stop1, ease_out_cubic(local))
+            } else {
+                let local = (t - c.split) / (1.0 - c.split);
+                lerp(c.stop2, anim.to, ease_out_cubic(local))
+            }
+        }
+    }
 }
 
 /// Recomputable layout cache — widest shaped line, used by external scroll UI to size horizontal extent.

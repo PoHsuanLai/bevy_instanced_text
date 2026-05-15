@@ -13,22 +13,23 @@
 //! ```no_run
 //! # use bevy::prelude::*;
 //! # use bevy_instanced_text::prelude::*;
-//! # use bevy_instanced_text::{MonoCellWidth, resolve_line_height, SmoothScroll};
+//! # use bevy_instanced_text::{MonoCellWidth, resolve_line_height, VerticalScroll, HorizontalScroll};
 //! # use bevy_instanced_text::view::pipeline::DisplayLayout;
 //! # use bevy_instanced_text::view::bounds::row_metrics;
 //! fn position_my_popup(
 //!     editor: Query<(
 //!         &ComputedNode,
-//!         &SmoothScroll,
+//!         &VerticalScroll,
+//!         &HorizontalScroll,
 //!         &TextFont,
 //!         &bevy::text::LineHeight,
 //!         &MonoCellWidth,
 //!         &DisplayLayout,
 //!     )>,
 //! ) {
-//!     let (computed, smooth, font, lh, mono, _layout) = editor.single().unwrap();
+//!     let (computed, v_scroll, h_scroll, font, lh, mono, _layout) = editor.single().unwrap();
 //!     let line_height = resolve_line_height(*lh, font.font_size);
-//!     let metrics = row_metrics(computed, smooth, font, line_height, mono);
+//!     let metrics = row_metrics(computed, v_scroll, h_scroll, font, line_height, mono);
 //!     let band = metrics.row_glyph_band(12);
 //!     let popup_top_left = band.min - bevy::math::Vec2::new(0.0, 100.0);
 //!     // commands.spawn(Node { left: Val::Px(popup_top_left.x), top: Val::Px(popup_top_left.y), .. });
@@ -39,7 +40,7 @@ use bevy::math::{Rect, Vec2};
 use bevy::ui::ComputedNode;
 
 use super::font::MonoCellWidth;
-use super::text::SmoothScroll;
+use super::text::{HorizontalScroll, VerticalScroll};
 use bevy::text::TextFont;
 
 /// Default baseline-offset ratio (~32% of font size), matching
@@ -69,15 +70,16 @@ pub struct RowMetrics {
 /// when a layout is available.
 pub fn row_metrics(
     computed: &ComputedNode,
-    smooth: &SmoothScroll,
+    v_scroll: &VerticalScroll,
+    h_scroll: &HorizontalScroll,
     font: &TextFont,
     line_height: f32,
     mono: &MonoCellWidth,
 ) -> RowMetrics {
     row_metrics_with_baseline(
         computed,
-        smooth.offset_y,
-        smooth.horizontal,
+        v_scroll.current,
+        h_scroll.current,
         line_height,
         mono,
         font.font_size * DEFAULT_BASELINE_OFFSET_RATIO,
@@ -230,7 +232,8 @@ pub struct RowMetricsParam<'w, 's> {
         (
             bevy::ecs::entity::Entity,
             &'static bevy::ui::ComputedNode,
-            &'static SmoothScroll,
+            &'static VerticalScroll,
+            &'static HorizontalScroll,
             &'static TextFont,
             &'static bevy::text::LineHeight,
             &'static MonoCellWidth,
@@ -242,12 +245,12 @@ pub struct RowMetricsParam<'w, 's> {
 impl<'w, 's> RowMetricsParam<'w, 's> {
     /// `RowMetrics` for `entity`, or `None` if a required component is missing.
     pub fn get(&self, entity: bevy::ecs::entity::Entity) -> Option<RowMetrics> {
-        let (_, computed, smooth, font, lh, mono, layout) = self.query.get(entity).ok()?;
+        let (_, computed, v_scroll, h_scroll, font, lh, mono, layout) = self.query.get(entity).ok()?;
         let line_height = crate::view::font::resolve_line_height(*lh, font.font_size);
         let baseline = layout
             .map(|l| l.baseline_offset)
             .unwrap_or(font.font_size * DEFAULT_BASELINE_OFFSET_RATIO);
-        Some(row_metrics_with_baseline(computed, smooth.offset_y, smooth.horizontal, line_height, mono, baseline))
+        Some(row_metrics_with_baseline(computed, v_scroll.current, h_scroll.current, line_height, mono, baseline))
     }
 
     /// [`get`](Self::get) that panics on missing components.
@@ -255,7 +258,7 @@ impl<'w, 's> RowMetricsParam<'w, 's> {
         self.get(entity).unwrap_or_else(|| {
             panic!(
                 "RowMetricsParam: entity {:?} is missing one of \
-                 (ComputedNode, SmoothScroll, TextFont, LineHeight, MonoCellWidth)",
+                 (ComputedNode, VerticalScroll, HorizontalScroll, TextFont, LineHeight, MonoCellWidth)",
                 entity
             )
         })
@@ -265,14 +268,14 @@ impl<'w, 's> RowMetricsParam<'w, 's> {
     pub fn iter(&self) -> impl Iterator<Item = (bevy::ecs::entity::Entity, RowMetrics)> + '_ {
         self.query
             .iter()
-            .map(|(entity, computed, smooth, font, lh, mono, layout)| {
+            .map(|(entity, computed, v_scroll, h_scroll, font, lh, mono, layout)| {
                 let line_height = crate::view::font::resolve_line_height(*lh, font.font_size);
                 let baseline = layout
                     .map(|l| l.baseline_offset)
                     .unwrap_or(font.font_size * DEFAULT_BASELINE_OFFSET_RATIO);
                 (
                     entity,
-                    row_metrics_with_baseline(computed, smooth.offset_y, smooth.horizontal, line_height, mono, baseline),
+                    row_metrics_with_baseline(computed, v_scroll.current, h_scroll.current, line_height, mono, baseline),
                 )
             })
     }
@@ -391,17 +394,18 @@ mod tests {
         computed.size = bevy::math::Vec2::new(800.0, 600.0);
         computed.inverse_scale_factor = 1.0;
         computed.padding.min_inset = bevy::math::Vec2::new(50.0, 8.0);
-        let smooth = SmoothScroll { offset_y: 100.0, target_y: 100.0, horizontal: 0.0, ..Default::default() };
+        let v_scroll = VerticalScroll(crate::view::text::ScrollAxis { current: 100.0, ..Default::default() });
+        let h_scroll = HorizontalScroll::default();
         let font = bevy::text::TextFont::from_font_size(14.0);
         let line_height_comp = bevy::text::LineHeight::Px(21.0);
         let mono = MonoCellWidth { px: 8.4 };
         let mut layout = DisplayLayout::default();
         layout.baseline_offset = 14.0 * 0.32;
 
-        let direct = row_metrics_with_baseline(&computed, smooth.offset_y, smooth.horizontal, 21.0, &mono, layout.baseline_offset);
+        let direct = row_metrics_with_baseline(&computed, v_scroll.current, h_scroll.current, 21.0, &mono, layout.baseline_offset);
 
         let entity = world
-            .spawn((computed, smooth, font.clone(), line_height_comp, mono, layout.clone()))
+            .spawn((computed, v_scroll, h_scroll, font.clone(), line_height_comp, mono, layout.clone()))
             .id();
 
         let result = world

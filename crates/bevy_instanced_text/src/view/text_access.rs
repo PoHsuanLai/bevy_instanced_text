@@ -9,14 +9,12 @@
 //! cursor / selection / overlay producers.
 
 use bevy::prelude::*;
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use super::font::MonoCellWidth;
 use super::pipeline::DisplayLayout;
 use super::glyph::{LineShape, ShapedGlyph, ShapedLine, StyleRun};
-use super::text::{ContentMetrics, SmoothScroll, TextBuffer, TextContent};
-use bevy::ui::ScrollPosition;
+use super::text::{ContentMetrics, HorizontalScroll, TextBuffer, TextContent, VerticalScroll};
 use super::text_style::{HiddenLines, LineStyles, RunWithText, TextBounds};
 use bevy::ui::ComputedNode;
 use crate::gpu::GlyphAtlas;
@@ -29,29 +27,6 @@ pub const VIEWPORT_BUFFER_LINES: u32 = 4;
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LayoutProduceSet;
 
-/// Per-entity dirty-detection key. Equality means "no rebuild needed".
-/// Floats are compared by bit pattern (NaN comparisons aren't a real
-/// concern — scroll/viewport never produce NaN under normal use).
-///
-/// Public so [`produce_layouts`] can be called as a Bevy system from
-/// downstream crates / tests via `RunSystemOnce` — the `Local<HashMap<..>>`
-/// parameter forces the inner type to be at least as visible as the system.
-#[derive(Clone, PartialEq, Eq)]
-pub struct LayoutFingerprint {
-    /// True when `TextBuffer<T>` was marked changed by Bevy's change detection.
-    buffer_changed: bool,
-    scroll_bits: u32,
-    h_scroll_bits: u32,
-    viewport_w: u32,
-    viewport_h: u32,
-    viewport_top_bits: u32,
-    font_size_tenths: u32,
-    line_height_tenths: u32,
-    style_arc_addr: usize,
-    hidden_arc_addr: usize,
-    wrap_budget_bits: u64,
-    wrap_indent_bits: u32,
-}
 
 /// The buffer-line range a layout pass will touch. Shared between the
 /// engine's `produce_layouts` and editor-side producer systems (e.g. the
@@ -120,9 +95,9 @@ pub fn visible_buffer_range(
 pub fn produce_layouts<T: TextContent + Component>(
     mut q: Query<
         (
-            Entity,
-            Ref<TextBuffer<T>>,
-            &SmoothScroll,
+            &TextBuffer<T>,
+            &VerticalScroll,
+            &HorizontalScroll,
             &mut ContentMetrics,
             &ComputedNode,
             &TextFont,
@@ -134,17 +109,27 @@ pub fn produce_layouts<T: TextContent + Component>(
             Option<&TextBounds>,
             Option<&super::measurement::LayoutTuning>,
         ),
+        Or<(
+            Changed<TextBuffer<T>>,
+            Changed<VerticalScroll>,
+            Changed<HorizontalScroll>,
+            Changed<ComputedNode>,
+            Changed<TextFont>,
+            Changed<bevy::text::LineHeight>,
+            Changed<MonoCellWidth>,
+            Changed<HiddenLines>,
+            Changed<LineStyles>,
+            Changed<TextBounds>,
+        )>,
     >,
     mut atlas: ResMut<GlyphAtlas>,
     fonts: Res<Assets<bevy::text::Font>>,
-    mut last_fingerprints: Local<HashMap<Entity, LayoutFingerprint>>,
 ) {
     let _span = bevy::prelude::info_span!("produce_layouts").entered();
-    let mut alive: std::collections::HashSet<Entity> = std::collections::HashSet::new();
     for (
-        entity,
         buffer,
-        smooth,
+        v_scroll,
+        h_scroll,
         mut metrics,
         tv_viewport,
         font,
@@ -160,98 +145,27 @@ pub fn produce_layouts<T: TextContent + Component>(
         let buffer_lines = tuning
             .map(|t| t.viewport_buffer_lines)
             .unwrap_or(VIEWPORT_BUFFER_LINES);
-        alive.insert(entity);
         let wrap = wrap.copied().unwrap_or_default();
         let line_height = crate::view::font::resolve_line_height(*lh, font.font_size);
-
-        // Identity-keyed change detection: a producer that writes a fresh
-        // Arc each refresh changes the address; the engine refingerprints.
-        let style_arc_addr = styles
-            .map(|s| Arc::as_ptr(&s.by_line) as usize)
-            .unwrap_or(0);
-        let hidden_arc_addr = hidden.map(|h| Arc::as_ptr(&h.0) as usize).unwrap_or(0);
-
-        let inv = tv_viewport.inverse_scale_factor();
-        let logical = tv_viewport.size() * inv;
-        let text_area_top = tv_viewport.content_inset().min_inset.y * inv;
-        let fingerprint = LayoutFingerprint {
-            buffer_changed: buffer.is_changed(),
-            scroll_bits: smooth.offset_y.to_bits(),
-            h_scroll_bits: smooth.horizontal.to_bits(),
-            viewport_w: logical.x as u32,
-            viewport_h: logical.y as u32,
-            viewport_top_bits: text_area_top.to_bits(),
-            font_size_tenths: (font.font_size * 10.0) as u32,
-            line_height_tenths: (line_height * 10.0) as u32,
-            style_arc_addr,
-            hidden_arc_addr,
-            wrap_budget_bits: wrap
-                .width
-                .map(|v| v.to_bits() as u64)
-                .unwrap_or(u64::MAX),
-            wrap_indent_bits: wrap.indent_px.to_bits(),
-        };
-
-        // Tracy diagnostic: which fingerprint field changed since last frame?
-        // Each cache-miss reason gets its own zone name so Tracy's per-zone
-        // counts directly tell us how often each invalidation source fires.
-        // Helps catch spurious invalidations (e.g. an upstream producer
-        // writing a fresh `Arc` every frame).
-        macro_rules! rebuild {
-            ($miss_name:literal) => {{
-                let _miss = bevy::prelude::info_span!($miss_name).entered();
-                let new_layout = build_display_layout(
-                    &**buffer,
-                    smooth.offset_y,
-                    smooth.horizontal,
-                    &mut metrics,
-                    tv_viewport,
-                    font,
-                    line_height,
-                    mono,
-                    wrap,
-                    layout.default_fg,
-                    hidden,
-                    styles,
-                    Some(&mut atlas),
-                    Some(&fonts),
-                    buffer_lines,
-                );
-                *layout = new_layout;
-            }};
-        }
-
-        match last_fingerprints.get(&entity) {
-            None => rebuild!("layout_miss_first"),
-            Some(prev) if prev == &fingerprint => continue,
-            Some(prev) => {
-                if prev.buffer_changed != fingerprint.buffer_changed && fingerprint.buffer_changed {
-                    rebuild!("layout_miss_content");
-                } else if prev.scroll_bits != fingerprint.scroll_bits
-                    || prev.h_scroll_bits != fingerprint.h_scroll_bits
-                {
-                    rebuild!("layout_miss_scroll");
-                } else if prev.viewport_w != fingerprint.viewport_w
-                    || prev.viewport_h != fingerprint.viewport_h
-                    || prev.viewport_top_bits != fingerprint.viewport_top_bits
-                {
-                    rebuild!("layout_miss_viewport");
-                } else if prev.font_size_tenths != fingerprint.font_size_tenths
-                    || prev.line_height_tenths != fingerprint.line_height_tenths
-                {
-                    rebuild!("layout_miss_font");
-                } else if prev.style_arc_addr != fingerprint.style_arc_addr {
-                    rebuild!("layout_miss_styles");
-                } else if prev.hidden_arc_addr != fingerprint.hidden_arc_addr {
-                    rebuild!("layout_miss_hidden");
-                } else {
-                    rebuild!("layout_miss_wrap");
-                }
-            }
-        }
-        last_fingerprints.insert(entity, fingerprint);
+        let new_layout = build_display_layout(
+            &**buffer,
+            v_scroll.current,
+            h_scroll.current,
+            &mut metrics,
+            tv_viewport,
+            font,
+            line_height,
+            mono,
+            wrap,
+            layout.default_fg,
+            hidden,
+            styles,
+            Some(&mut atlas),
+            Some(&fonts),
+            buffer_lines,
+        );
+        *layout = new_layout;
     }
-    last_fingerprints.retain(|e, _| alive.contains(e));
 }
 
 /// Build a `DisplayLayout` for the visible viewport. Internal — called by
@@ -788,8 +702,8 @@ mod tests {
                 TextBuffer::new(crate::view::text::TextSpan::new(
                     "hello world\nsecond line\nthird line\n",
                 )),
-                bevy::ui::ScrollPosition::default(),
-                SmoothScroll::default(),
+                VerticalScroll::default(),
+                HorizontalScroll::default(),
                 ContentMetrics::default(),
                 test_computed(),
                 test_font(),

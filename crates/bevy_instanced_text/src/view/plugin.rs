@@ -16,10 +16,9 @@ use bevy::ui::{ui_transform::UiGlobalTransform, CalculatedClip, ComputedNode, Co
 use super::font::{MonoCellWidth, MonoFontFaces};
 use super::pipeline::DisplayLayout;
 use super::text_access::{produce_layouts, LayoutProduceSet};
-use super::overlay::TextViewOverlays;
+use super::overlay::{TextOverlays, TextUnderlays};
 use super::render::{render_layout, BatchTransform, GlyphBatchComponent, TextViewBatch};
-use super::text::{CompositeStops, ContentMetrics, ScrollAnimation, SmoothScroll, TextBuffer, TextContent};
-use bevy::ui::ScrollPosition;
+use super::text::{CompositeStops, ContentMetrics, HorizontalScroll, ScrollAnimation, ScrollAxis, TextBuffer, TextContent, VerticalScroll};
 use super::text_style::TextBounds;
 use super::color::{TextBackgroundColor, TextColor};
 use super::measurement::LayoutTuning;
@@ -56,23 +55,24 @@ impl<T: TextContent + Component> Plugin for TextContentPlugin<T> {
                 bevy::text::LineHeight::RelativeToFont(1.5)
             });
         app.world_mut()
-            .register_required_components::<TextBuffer<T>, ScrollPosition>();
+            .register_required_components::<TextBuffer<T>, VerticalScroll>();
         app.world_mut()
-            .register_required_components::<TextBuffer<T>, SmoothScroll>();
+            .register_required_components::<TextBuffer<T>, HorizontalScroll>();
         app.world_mut()
             .register_required_components::<TextBuffer<T>, ContentMetrics>();
         app.world_mut()
             .register_required_components::<TextBuffer<T>, DisplayLayout>();
         app.world_mut()
-            .register_required_components::<TextBuffer<T>, TextViewOverlays>();
+            .register_required_components::<TextBuffer<T>, TextUnderlays>();
+        app.world_mut()
+            .register_required_components::<TextBuffer<T>, TextOverlays>();
         app.world_mut()
             .register_required_components::<TextBuffer<T>, TextFont>();
         app.world_mut()
             .register_required_components::<TextBuffer<T>, MonoFontFaces>();
         app.world_mut()
             .register_required_components::<TextBuffer<T>, MonoCellWidth>();
-        app.world_mut()
-            .register_required_components::<TextBuffer<T>, bevy::text::TextLayout>();
+
         app.world_mut()
             .register_required_components::<TextBuffer<T>, TextBounds>();
         app.world_mut()
@@ -87,6 +87,10 @@ impl<T: TextContent + Component> Plugin for TextContentPlugin<T> {
             .register_required_components::<TextBuffer<T>, Transform>();
         app.world_mut()
             .register_required_components::<TextBuffer<T>, Visibility>();
+        app.world_mut()
+            .register_required_components_with::<TextBuffer<T>, InheritedVisibility>(|| {
+                InheritedVisibility::VISIBLE
+            });
         app.world_mut()
             .register_required_components::<TextBuffer<T>, bevy::picking::Pickable>();
 
@@ -120,8 +124,10 @@ impl Plugin for InstancedTextPlugin {
             .register_type::<TextColor>()
             .register_type::<TextBackgroundColor>()
             .register_type::<TextViewBatchEntity>()
-            .register_type::<TextViewOverlays>()
-            .register_type::<SmoothScroll>()
+            .register_type::<TextUnderlays>()
+            .register_type::<TextOverlays>()
+            .register_type::<VerticalScroll>()
+            .register_type::<HorizontalScroll>()
             .register_type::<ContentMetrics>();
 
         app.register_type::<super::text::TextSpan>();
@@ -130,13 +136,12 @@ impl Plugin for InstancedTextPlugin {
 
         app.add_systems(
             PostUpdate,
-            animate_text_view_scroll
-                .before(UiSystems::Layout),
+            (animate_vertical_scroll, animate_horizontal_scroll).before(UiSystems::Layout),
         );
 
         // Ensure there is always a camera marked as the default UI camera so
         // Bevy UI layout can resolve Val::Percent sizes for TextBuffer<T> Node entities.
-        app.add_systems(PostStartup, ensure_default_ui_camera);
+        app.add_systems(Startup, ensure_default_ui_camera);
 
         app.add_systems(
             PostUpdate,
@@ -173,34 +178,12 @@ const COMPOSITE_SPLIT: f32 = 0.33;
 const COMPOSITE_VIEWPORT_THRESHOLD: f32 = 2.5;
 const COMPOSITE_STOP_INSET: f32 = 0.75;
 
-#[inline]
-fn ease_out_cubic(t: f32) -> f32 {
-    let inv = 1.0 - t;
-    1.0 - inv * inv * inv
-}
-
-#[inline]
-fn lerp(a: f32, b: f32, t: f32) -> f32 {
-    a + (b - a) * t
-}
-
-fn sample_animation(anim: &ScrollAnimation) -> f32 {
-    let t = (anim.elapsed / anim.duration).clamp(0.0, 1.0);
-    match &anim.composite {
-        None => lerp(anim.from, anim.to, ease_out_cubic(t)),
-        Some(c) => {
-            if t < c.split {
-                let local = t / c.split;
-                lerp(anim.from, c.stop1, ease_out_cubic(local))
-            } else {
-                let local = (t - c.split) / (1.0 - c.split);
-                lerp(c.stop2, anim.to, ease_out_cubic(local))
-            }
-        }
-    }
-}
-
-fn build_animation(from: f32, to: f32, duration: f32, viewport_size: f32) -> ScrollAnimation {
+pub(crate) fn build_animation(
+    from: f32,
+    to: f32,
+    duration: f32,
+    viewport_size: f32,
+) -> ScrollAnimation {
     let composite = if viewport_size > 0.0
         && (to - from).abs() > COMPOSITE_VIEWPORT_THRESHOLD * viewport_size
     {
@@ -227,99 +210,64 @@ fn build_animation(from: f32, to: f32, duration: f32, viewport_size: f32) -> Scr
     }
 }
 
-fn animate_text_view_scroll(
-    mut query: Query<(&mut SmoothScroll, &ComputedNode), With<DisplayLayout>>,
+/// Single-axis scroll step. Reads the existing `axis`, advances or rebuilds
+/// the easing animation, returns the new state. Pure — no Bevy types.
+///
+/// `dt` is per-frame delta, `viewport_size` is the relevant axis dimension
+/// (height for vertical, width for horizontal — used to detect "huge jumps"
+/// that warrant the composite curve).
+///
+/// Returns `Some(new_axis)` if the state changed (so the caller writes through
+/// `Mut` and triggers change detection), `None` if nothing moved.
+fn step_axis(axis: &ScrollAxis, dt: f32, viewport_size: f32) -> Option<ScrollAxis> {
+    let mut anim = match &axis.anim {
+        Some(a) if (a.to - axis.target).abs() <= f32::EPSILON => a.clone(),
+        _ if (axis.target - axis.current).abs() > 0.5 => {
+            build_animation(axis.current, axis.target, axis.duration, viewport_size)
+        }
+        // No anim in progress and target is already close to current — nothing to do.
+        _ => return None,
+    };
+
+    let (new_current, finished) = anim.advance(dt);
+    let new_anim = if finished { None } else { Some(anim) };
+
+    let current_changed = (new_current - axis.current).abs() > 1e-4;
+    let anim_state_changed = axis.anim.is_some() != new_anim.is_some();
+    if !current_changed && !anim_state_changed {
+        return None;
+    }
+
+    Some(ScrollAxis {
+        target: axis.target,
+        current: new_current,
+        duration: axis.duration,
+        anim: new_anim,
+    })
+}
+
+fn animate_vertical_scroll(
+    mut query: Query<(&mut VerticalScroll, &ComputedNode), With<DisplayLayout>>,
     time: Res<Time>,
 ) {
     let dt = time.delta_secs();
+    for (mut axis, computed) in query.iter_mut() {
+        let viewport_h = computed.size().y * computed.inverse_scale_factor();
+        if let Some(next) = step_axis(&axis.0, dt, viewport_h) {
+            axis.0 = next;
+        }
+    }
+}
 
-    for (mut smooth, computed) in query.iter_mut() {
-        let inv = computed.inverse_scale_factor();
-        let logical = computed.size() * inv;
-        let viewport_h = logical.y;
-        let viewport_w = logical.x;
-
-        // Read current values without triggering change detection.
-        let (duration, target_v, scroll_v, target_h, scroll_h, has_v_anim, has_h_anim) = {
-            let s = smooth.bypass_change_detection();
-            (
-                s.duration,
-                s.target_y,
-                s.offset_y,
-                s.target_x,
-                s.horizontal,
-                s.vertical_anim.is_some(),
-                s.horizontal_anim.is_some(),
-            )
-        };
-
-        let needs_new_v = if has_v_anim {
-            let to = smooth.bypass_change_detection().vertical_anim.as_ref().unwrap().to;
-            (to - target_v).abs() > f32::EPSILON
-        } else {
-            (target_v - scroll_v).abs() > 0.5
-        };
-
-        let needs_new_h = if has_h_anim {
-            let to = smooth.bypass_change_detection().horizontal_anim.as_ref().unwrap().to;
-            (to - target_h).abs() > f32::EPSILON
-        } else {
-            (target_h - scroll_h).abs() > 0.5
-        };
-
-        let v_anim_next = if needs_new_v {
-            Some(build_animation(scroll_v, target_v, duration, viewport_h))
-        } else {
-            smooth.bypass_change_detection().vertical_anim.clone()
-        };
-        let h_anim_next = if needs_new_h {
-            Some(build_animation(scroll_h, target_h, duration, viewport_w))
-        } else {
-            smooth.bypass_change_detection().horizontal_anim.clone()
-        };
-
-        let (new_scroll_v, new_v_anim) = match v_anim_next {
-            Some(mut anim) => {
-                anim.elapsed += dt;
-                if anim.elapsed >= anim.duration {
-                    (anim.to, None)
-                } else {
-                    let v = sample_animation(&anim);
-                    (v, Some(anim))
-                }
-            }
-            None => (scroll_v, None),
-        };
-
-        let (new_scroll_h, new_h_anim) = match h_anim_next {
-            Some(mut anim) => {
-                anim.elapsed += dt;
-                if anim.elapsed >= anim.duration {
-                    (anim.to, None)
-                } else {
-                    let v = sample_animation(&anim);
-                    (v, Some(anim))
-                }
-            }
-            None => (scroll_h, None),
-        };
-
-        // Only write through real Mut (triggering change detection) when values
-        // actually changed — prevents spurious layout rebuilds on idle frames.
-        let scroll_v_changed = (new_scroll_v - scroll_v).abs() > 1e-4;
-        let scroll_h_changed = (new_scroll_h - scroll_h).abs() > 1e-4;
-        let v_anim_changed = needs_new_v || has_v_anim != new_v_anim.is_some();
-        let h_anim_changed = needs_new_h || has_h_anim != new_h_anim.is_some();
-
-        if scroll_v_changed || v_anim_changed || h_anim_changed || scroll_h_changed {
-            if scroll_v_changed {
-                smooth.offset_y = new_scroll_v;
-            }
-            if scroll_h_changed || v_anim_changed || h_anim_changed {
-                smooth.horizontal = new_scroll_h;
-                smooth.vertical_anim = new_v_anim;
-                smooth.horizontal_anim = new_h_anim;
-            }
+fn animate_horizontal_scroll(
+    mut query: Query<(&mut HorizontalScroll, &ComputedNode), With<DisplayLayout>>,
+    time: Res<Time>,
+) {
+    let dt = time.delta_secs();
+    for (mut axis, computed) in query.iter_mut() {
+        let viewport_w = computed.size().x * computed.inverse_scale_factor();
+        if let Some(next) = step_axis(&axis.0, dt, viewport_w) {
+            axis.0 = next;
         }
     }
 }
@@ -330,16 +278,18 @@ pub fn update_text_views(
     mut text_views: Query<
         (
             Entity,
-            &SmoothScroll,
+            &VerticalScroll,
+            &HorizontalScroll,
             &ComputedNode,
             &UiGlobalTransform,
             Option<&CalculatedClip>,
             Option<&ComputedUiTargetCamera>,
             &TextFont,
             &MonoFontFaces,
-            &bevy::text::TextLayout,
+            Option<&bevy::text::TextLayout>,
             Ref<DisplayLayout>,
-            Option<Ref<TextViewOverlays>>,
+            Ref<TextUnderlays>,
+            Ref<TextOverlays>,
             Option<&TextViewBatchEntity>,
             Option<&bevy_camera::visibility::RenderLayers>,
         ),
@@ -350,9 +300,10 @@ pub fn update_text_views(
     fonts: Res<Assets<bevy::text::Font>>,
 ) {
     let _span = bevy::prelude::info_span!("update_text_views").entered();
-    for (tv_entity, smooth, computed, ui_transform, clip, target_cam, font, faces_cfg, text_layout, layout, overlays, batch_entity_opt, render_layers) in
+    for (tv_entity, v_scroll, h_scroll, computed, ui_transform, clip, target_cam, font, faces_cfg, text_layout, layout, underlays, overlays, batch_entity_opt, render_layers) in
         text_views.iter_mut()
     {
+        let justify = text_layout.map(|t| t.justify).unwrap_or_default();
         let regular = atlas.ensure_font(&font.font, &fonts);
         let bold = faces_cfg
             .font_bold
@@ -373,13 +324,11 @@ pub fn update_text_views(
             bold_italic,
             synthesis: faces_cfg.font_synthesis,
         };
-        // Skip the rebuild if neither layout nor overlays changed — the GPU batch is still valid.
-        let overlays_changed = overlays.as_ref().map(|o| o.is_changed()).unwrap_or(false);
-        if !layout.is_changed() && !overlays_changed && batch_entity_opt.is_some() {
+        // Skip the rebuild if nothing changed — the GPU batch is still valid.
+        if !layout.is_changed() && !underlays.is_changed() && !overlays.is_changed() && batch_entity_opt.is_some() {
             continue;
         }
         let layout: &DisplayLayout = &layout;
-        let overlays = overlays.as_deref();
         let inv = computed.inverse_scale_factor();
         let inset = computed.content_inset();
         let content_start_x = inset.min_inset.x * inv;
@@ -409,17 +358,18 @@ pub fn update_text_views(
             let _render_span = bevy::prelude::info_span!("render_layout").entered();
             render_layout(
                 layout,
-                overlays,
+                &underlays.0,
+                &overlays.0,
                 computed,
                 &mut atlas,
                 &fonts,
                 super::render::RenderContext {
                     content_start_x,
                     content_end_inset_x,
-                    horizontal_scroll_offset: smooth.horizontal,
+                    horizontal_scroll_offset: h_scroll.current,
                     font_size: font.font_size,
                     faces,
-                    justify: text_layout.justify,
+                    justify,
                 },
             )
         };
@@ -429,14 +379,14 @@ pub fn update_text_views(
         let logical = computed.size() * inv;
         let text_area_top = computed.content_inset().min_inset.y * inv;
         let line_height = layout.line_height;
-        let start_pixels = smooth.offset_y - text_area_top;
+        let start_pixels = v_scroll.current - text_area_top;
         let first_visible = (start_pixels / line_height).floor().max(0.0) as usize;
         let visible_count = (logical.y / line_height).ceil() as usize;
         let last_visible = first_visible + visible_count;
 
         let batch_data = TextViewBatch {
-            built_at_scroll: smooth.offset_y,
-            built_at_horizontal_scroll: smooth.horizontal,
+            built_at_scroll: v_scroll.current,
+            built_at_horizontal_scroll: h_scroll.current,
             first_line: first_visible,
             last_line: last_visible,
             built_at_width: logical.x as u32,

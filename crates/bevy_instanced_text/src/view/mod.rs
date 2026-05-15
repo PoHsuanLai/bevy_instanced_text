@@ -22,7 +22,7 @@ pub use text_access::{visible_buffer_range, LayoutProduceSet};
 
 pub use overlay::{
     for_each_row_in_buffer_span, CornerRadii, RectOverlay, RowPosition, RowVertical,
-    TextViewOverlays,
+    TextOverlays, TextUnderlays,
 };
 pub use plugin::{
     InstancedTextPlugin, InstancedTextPlugins, TextContentPlugin, TextViewBatchEntity,
@@ -30,6 +30,6 @@ pub use plugin::{
 };
 pub use render::{BatchTransform, GlyphBatchComponent, GlyphInstance};
 pub use glyph::{ShapedLine, StyleRun, TextDecoration};
-pub use text::{ContentMetrics, SmoothScroll, TextBuffer, TextContent, TextSpan};
+pub use text::{ContentMetrics, HorizontalScroll, ScrollAxis, TextBuffer, TextContent, TextSpan, VerticalScroll};
 pub use text_style::{HiddenLines, LineStyles, RunWithText, TextBounds};
 pub use color::{TextBackgroundColor, TextColor};
