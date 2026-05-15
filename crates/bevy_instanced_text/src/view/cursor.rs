@@ -34,14 +34,14 @@ use bevy::ecs::entity::Entity;
 use bevy::ecs::system::{Query, SystemParam};
 use bevy::math::Vec2;
 
-use bevy::ui::ComputedNode;
+use bevy::ui::{ComputedNode, ScrollPosition};
 
 use std::marker::PhantomData;
 
 use super::bounds::{row_metrics_with_baseline, RowMetrics, DEFAULT_BASELINE_OFFSET_RATIO};
 use super::font::MonoCellWidth;
 use super::pipeline::DisplayLayout;
-use super::text::{HorizontalScroll, TextBuffer, TextContent, VerticalScroll};
+use super::text::{TextBuffer, TextContent};
 use bevy::text::TextFont;
 use bevy::ecs::component::Component;
 
@@ -86,8 +86,7 @@ type BufferAnchorQuery<'w, 's, T> = Query<
     (
         Entity,
         &'static ComputedNode,
-        &'static VerticalScroll,
-        &'static HorizontalScroll,
+        &'static ScrollPosition,
         &'static TextFont,
         &'static bevy::text::LineHeight,
         &'static MonoCellWidth,
@@ -109,9 +108,9 @@ impl<'w, 's, T: TextContent + Component> BufferAnchorParam<'w, 's, T> {
     /// attached, or a monospace cell index otherwise. LSP servers
     /// report UTF-16 code units; convert before calling for non-ASCII.
     pub fn at_buffer_pos(&self, entity: Entity, line: u32, character: u32) -> Option<AnchorPoint> {
-        let (_, computed, v_scroll, h_scroll, font, lh, mono, _buffer, layout) = self.query.get(entity).ok()?;
+        let (_, computed, scroll, font, lh, mono, _buffer, layout) = self.query.get(entity).ok()?;
         let line_height = crate::view::font::resolve_line_height(*lh, font.font_size);
-        let metrics = build_metrics(computed, v_scroll.current, h_scroll.current, font, line_height, mono, layout);
+        let metrics = build_metrics(computed, scroll.y, scroll.x, font, line_height, mono, layout);
 
         let (display_row, pixel_x) =
             resolve_display_row_and_x(line, character as usize, mono, layout);
@@ -123,9 +122,9 @@ impl<'w, 's, T: TextContent + Component> BufferAnchorParam<'w, 's, T> {
     /// [`TextContent`]). Convenient for popups whose state stores the
     /// trigger position as a char offset rather than `(line, character)`.
     pub fn at_char_index(&self, entity: Entity, char_index: usize) -> Option<AnchorPoint> {
-        let (_, computed, v_scroll, h_scroll, font, lh, mono, buffer, layout) = self.query.get(entity).ok()?;
+        let (_, computed, scroll, font, lh, mono, buffer, layout) = self.query.get(entity).ok()?;
         let line_height = crate::view::font::resolve_line_height(*lh, font.font_size);
-        let metrics = build_metrics(computed, v_scroll.current, h_scroll.current, font, line_height, mono, layout);
+        let metrics = build_metrics(computed, scroll.y, scroll.x, font, line_height, mono, layout);
 
         let char_index = char_index.min(buffer.char_count());
         let line_index = buffer.char_to_line(char_index);
@@ -217,11 +216,10 @@ mod tests {
     use super::*;
     use crate::view::font::MonoCellWidth;
     use crate::view::pipeline::DisplayLayout;
-    use crate::view::text::{HorizontalScroll, ScrollAxis, VerticalScroll};
-    use bevy::asset::Handle;
     use bevy::ecs::system::RunSystemOnce;
     use bevy::math::Vec2;
     use bevy::prelude::*;
+    use bevy::ui::ScrollPosition;
 
     fn make_computed() -> bevy::ui::ComputedNode {
         let mut c = bevy::ui::ComputedNode::default();
@@ -233,8 +231,7 @@ mod tests {
 
     fn make_editor_world() -> (World, Entity) {
         let computed = make_computed();
-        let v_scroll = VerticalScroll(ScrollAxis { current: 100.0, ..Default::default() });
-        let h_scroll = HorizontalScroll::default();
+        let scroll = ScrollPosition(Vec2::new(0.0, 100.0));
         let font = bevy::text::TextFont::from_font_size(14.0);
         let line_height = bevy::text::LineHeight::Px(21.0);
         let mono = MonoCellWidth { px: 8.4 };
@@ -245,7 +242,7 @@ mod tests {
         layout.baseline_offset = 14.0 * 0.32;
 
         let mut world = World::new();
-        let entity = world.spawn((computed, v_scroll, h_scroll, font, line_height, mono, buffer, layout)).id();
+        let entity = world.spawn((computed, scroll, font, line_height, mono, buffer, layout)).id();
         (world, entity)
     }
 
@@ -278,15 +275,14 @@ mod tests {
     #[test]
     fn fallback_uses_monospace_columns() {
         let computed = make_computed();
-        let v_scroll = VerticalScroll::default();
-        let h_scroll = HorizontalScroll::default();
+        let scroll = ScrollPosition::default();
         let font = bevy::text::TextFont::from_font_size(14.0);
         let line_height = bevy::text::LineHeight::Px(21.0);
         let mono = MonoCellWidth { px: 8.4 };
         let buffer = TextBuffer::new(super::super::text::TextSpan::new("plain text"));
 
         let mut world = World::new();
-        let entity = world.spawn((computed, v_scroll, h_scroll, font, line_height, mono, buffer)).id();
+        let entity = world.spawn((computed, scroll, font, line_height, mono, buffer)).id();
 
         let anchor = world
             .run_system_once(move |anchors: BufferAnchorParam<super::super::text::TextSpan>| {

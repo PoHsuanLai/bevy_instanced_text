@@ -1,4 +1,9 @@
-//! TextContent trait, generic TextBuffer<T>, scroll state, and content metrics.
+//! TextContent trait, generic TextBuffer<T>, and content metrics.
+//!
+//! Scroll state is `bevy::ui::ScrollPosition` — read it directly from the
+//! same entity. The engine performs no animation; hosts that want smooth
+//! scroll write `ScrollPosition` themselves (via `bevy_tweening`, a custom
+//! animator, or however they like).
 
 use std::borrow::Cow;
 use std::ops::{Deref, DerefMut, Range};
@@ -86,21 +91,9 @@ pub trait TextContent: Send + Sync + 'static {
     }
 }
 
-/// A simple string-backed [`TextContent`] for labels, HUD values, DAW track
-/// names, and any other short text that doesn't need rope-level editing.
-///
-/// Mirrors Bevy's own `TextSpan(pub String)` naming convention. Spawning
-/// `TextBuffer::<TextSpan>::new(TextSpan::new("hello"))` is the simplest
-/// way to render instanced text.
-#[derive(Component, Clone, Default, Debug, Reflect)]
-#[reflect(Component, Default)]
-pub struct TextSpan(pub String);
-
-impl TextSpan {
-    pub fn new(text: impl Into<String>) -> Self {
-        Self(text.into())
-    }
-}
+/// Re-export Bevy's [`TextSpan`] so users don't need a separate import.
+/// `TextContent` is implemented for it below.
+pub use bevy::text::TextSpan;
 
 /// Compute `line(i)` for a `&str` body following the ropey convention:
 /// the slice **includes its trailing `\n`** when one is present. The final
@@ -148,7 +141,7 @@ fn line_count_of(body: &str) -> usize {
     }
 }
 
-impl TextContent for TextSpan {
+impl TextContent for bevy::text::TextSpan {
     fn line_count(&self) -> usize {
         line_count_of(&self.0)
     }
@@ -159,7 +152,6 @@ impl TextContent for TextSpan {
 
     fn line_len_chars(&self, i: usize) -> usize {
         let l = line_slice(&self.0, i);
-        // Spec: exclude trailing '\n'.
         let stripped = l.strip_suffix('\n').unwrap_or(l);
         stripped.chars().count()
     }
@@ -228,92 +220,6 @@ impl<T: TextContent> DerefMut for TextBuffer<T> {
 impl<T: TextContent + Default> Default for TextBuffer<T> {
     fn default() -> Self {
         Self(T::default())
-    }
-}
-
-/// Internal state shared by `VerticalScroll` and `HorizontalScroll`. Hosts
-/// write `target`; the animator advances `current` toward it via `anim`.
-/// Sign convention is axis-dependent: vertical is positive-down, horizontal
-/// positive-right (logical pixels for both).
-#[derive(Default, Clone, Debug, Reflect)]
-pub struct ScrollAxis {
-    /// Host writes this to request a scroll position.
-    pub target: f32,
-    /// Engine-written animated position. Renderers and hit-testing read this.
-    pub current: f32,
-    /// Easing length in seconds. `0.0` = instant. Synced from
-    /// `ScrollConfig::smooth_scroll_duration` by `apply_instant_scroll`.
-    pub duration: f32,
-    #[reflect(ignore)]
-    pub(crate) anim: Option<ScrollAnimation>,
-}
-
-/// Vertical smooth-scroll axis. `current` is positive-down logical pixels.
-#[derive(Component, Default, Reflect, Deref, DerefMut)]
-#[reflect(Component, Default)]
-pub struct VerticalScroll(pub ScrollAxis);
-
-/// Horizontal smooth-scroll axis. `current` is positive-right logical pixels.
-#[derive(Component, Default, Reflect, Deref, DerefMut)]
-#[reflect(Component, Default)]
-pub struct HorizontalScroll(pub ScrollAxis);
-
-#[derive(Clone, Debug)]
-pub(crate) struct ScrollAnimation {
-    pub from: f32,
-    pub to: f32,
-    pub elapsed: f32,
-    pub duration: f32,
-    pub composite: Option<CompositeStops>,
-}
-
-impl ScrollAnimation {
-    /// Advance by `dt` and return `(sampled_value, completed)`. When
-    /// `completed`, callers should drop the anim — the returned value is
-    /// `self.to`.
-    pub(crate) fn advance(&mut self, dt: f32) -> (f32, bool) {
-        self.elapsed += dt;
-        if self.elapsed >= self.duration {
-            (self.to, true)
-        } else {
-            (sample_animation(self), false)
-        }
-    }
-}
-
-/// Two-stage composite curve for jumps > 2.5× viewport; avoids the floaty
-/// tail that a single easeOutCubic produces over large distances.
-#[derive(Clone, Debug)]
-pub(crate) struct CompositeStops {
-    pub stop1: f32,
-    pub stop2: f32,
-    pub split: f32,
-}
-
-#[inline]
-fn ease_out_cubic(t: f32) -> f32 {
-    let inv = 1.0 - t;
-    1.0 - inv * inv * inv
-}
-
-#[inline]
-fn lerp(a: f32, b: f32, t: f32) -> f32 {
-    a + (b - a) * t
-}
-
-fn sample_animation(anim: &ScrollAnimation) -> f32 {
-    let t = (anim.elapsed / anim.duration).clamp(0.0, 1.0);
-    match &anim.composite {
-        None => lerp(anim.from, anim.to, ease_out_cubic(t)),
-        Some(c) => {
-            if t < c.split {
-                let local = t / c.split;
-                lerp(anim.from, c.stop1, ease_out_cubic(local))
-            } else {
-                let local = (t - c.split) / (1.0 - c.split);
-                lerp(c.stop2, anim.to, ease_out_cubic(local))
-            }
-        }
     }
 }
 

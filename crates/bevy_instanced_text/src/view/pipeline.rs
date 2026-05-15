@@ -55,6 +55,23 @@ impl DisplayLayout {
         Arc::ptr_eq(&self.lines, &other.lines)
     }
 
+    /// Total height of the document in logical pixels — equivalent to
+    /// `total_display_rows * line_height`. Use this to size an external
+    /// scroll UI, or as the upper clamp for [`scroll_to_bottom_target`].
+    pub fn total_content_height(&self) -> f32 {
+        self.total_display_rows as f32 * self.line_height
+    }
+
+    /// Maximum sensible `ScrollPosition.y` for this layout against a node of
+    /// `viewport_height` logical pixels. Pins the last row to the bottom of
+    /// the viewport; returns `0.0` when content fits entirely.
+    ///
+    /// Pair with `scroll_pos.y = layout.scroll_to_bottom_target(h)` to
+    /// "scroll to end" without the `f32::MAX` hack.
+    pub fn scroll_to_bottom_target(&self, viewport_height: f32) -> f32 {
+        (self.total_content_height() - viewport_height).max(0.0)
+    }
+
     /// Pixel x where `byte` begins within `display_row`, line-local (does not
     /// include `ShapedLine.x_offset`). Uses shaped advances when present;
     /// falls back to a `char_width` walk over `text` otherwise.
@@ -180,4 +197,40 @@ pub(crate) fn line_byte_at_x(line: &ShapedLine, x: f32, char_width_fallback: f32
         byte += ch.len_utf8();
     }
     byte
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn layout_with(total_rows: u32, line_height: f32) -> DisplayLayout {
+        DisplayLayout {
+            total_display_rows: total_rows,
+            line_height,
+            ..Default::default()
+        }
+    }
+
+    /// `total_content_height` is `rows * line_height` — no rounding, no off-by-one.
+    #[test]
+    fn total_content_height_multiplies_rows_by_line_height() {
+        let layout = layout_with(10, 21.0);
+        assert!((layout.total_content_height() - 210.0).abs() < 1e-4);
+    }
+
+    /// When content fits entirely, scroll target is `0` — no negative drift.
+    #[test]
+    fn scroll_to_bottom_zero_when_content_fits() {
+        let layout = layout_with(5, 20.0); // 100 px of content
+        assert_eq!(layout.scroll_to_bottom_target(200.0), 0.0);
+        assert_eq!(layout.scroll_to_bottom_target(100.0), 0.0);
+    }
+
+    /// Overflowing content pins the last row to the viewport bottom.
+    #[test]
+    fn scroll_to_bottom_pins_last_row() {
+        let layout = layout_with(20, 20.0); // 400 px content
+        // Viewport 100 px — bottom 100 px shows last 5 rows, so scroll target = 300.
+        assert!((layout.scroll_to_bottom_target(100.0) - 300.0).abs() < 1e-4);
+    }
 }

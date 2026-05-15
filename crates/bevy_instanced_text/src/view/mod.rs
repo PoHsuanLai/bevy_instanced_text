@@ -11,7 +11,6 @@ pub mod render;
 pub mod glyph;
 pub mod text;
 pub mod text_style;
-pub mod color;
 pub mod measurement;
 
 pub use bounds::{row_metrics, row_metrics_with_baseline, RowMetrics, RowMetricsParam};
@@ -30,6 +29,6 @@ pub use plugin::{
 };
 pub use render::{BatchTransform, GlyphBatchComponent, GlyphInstance};
 pub use glyph::{ShapedLine, StyleRun, TextDecoration};
-pub use text::{ContentMetrics, HorizontalScroll, ScrollAxis, TextBuffer, TextContent, TextSpan, VerticalScroll};
+pub use text::{ContentMetrics, TextBuffer, TextContent, TextSpan};
 pub use text_style::{HiddenLines, LineStyles, RunWithText, TextBounds};
-pub use color::{TextBackgroundColor, TextColor};
+pub use bevy::text::{TextBackgroundColor, TextColor};

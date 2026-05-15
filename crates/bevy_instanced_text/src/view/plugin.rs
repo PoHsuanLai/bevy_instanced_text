@@ -1,26 +1,29 @@
-//! Text view plugin — registers the rendering and scroll animation systems
-//! that turn `TextBuffer<T>` entities into GPU draw batches.
+//! Text view plugin — registers the rendering systems that turn
+//! `TextBuffer<T>` entities into GPU draw batches.
 //!
 //! [`InstancedTextPlugin`] sets up the core rendering infrastructure.
 //! [`TextContentPlugin<T>`] registers `produce_layouts::<T>` for a specific
 //! content type — add one per `T` you use. [`InstancedTextPlugins`] bundles
 //! everything including the `String` content type for simple labels.
+//!
+//! Scroll is `bevy::ui::ScrollPosition`. The engine reads it; it never
+//! writes it. Smooth scroll, if you want it, belongs in the host crate.
 
 use std::marker::PhantomData;
 
 use bevy::app::{PluginGroup, PluginGroupBuilder};
 use bevy::prelude::*;
 use bevy::math::Affine2;
-use bevy::ui::{ui_transform::UiGlobalTransform, CalculatedClip, ComputedNode, ComputedUiTargetCamera, IsDefaultUiCamera, UiSystems};
+use bevy::ui::{ui_transform::UiGlobalTransform, CalculatedClip, ComputedNode, ComputedUiTargetCamera, IsDefaultUiCamera, ScrollPosition, UiSystems};
 
 use super::font::{MonoCellWidth, MonoFontFaces};
 use super::pipeline::DisplayLayout;
 use super::text_access::{produce_layouts, LayoutProduceSet};
 use super::overlay::{TextOverlays, TextUnderlays};
 use super::render::{render_layout, BatchTransform, GlyphBatchComponent, TextViewBatch};
-use super::text::{CompositeStops, ContentMetrics, HorizontalScroll, ScrollAnimation, ScrollAxis, TextBuffer, TextContent, VerticalScroll};
+use super::text::{ContentMetrics, TextBuffer, TextContent};
 use super::text_style::TextBounds;
-use super::color::{TextBackgroundColor, TextColor};
+pub use bevy::text::{TextBackgroundColor, TextColor};
 use super::measurement::LayoutTuning;
 use crate::gpu::{atlas_ready, GlyphAtlas, GlyphAtlasPlugin, InstancedTextRenderPlugin};
 
@@ -55,9 +58,7 @@ impl<T: TextContent + Component> Plugin for TextContentPlugin<T> {
                 bevy::text::LineHeight::RelativeToFont(1.5)
             });
         app.world_mut()
-            .register_required_components::<TextBuffer<T>, VerticalScroll>();
-        app.world_mut()
-            .register_required_components::<TextBuffer<T>, HorizontalScroll>();
+            .register_required_components::<TextBuffer<T>, ScrollPosition>();
         app.world_mut()
             .register_required_components::<TextBuffer<T>, ContentMetrics>();
         app.world_mut()
@@ -68,6 +69,10 @@ impl<T: TextContent + Component> Plugin for TextContentPlugin<T> {
             .register_required_components::<TextBuffer<T>, TextOverlays>();
         app.world_mut()
             .register_required_components::<TextBuffer<T>, TextFont>();
+        app.world_mut()
+            .register_required_components::<TextBuffer<T>, TextColor>();
+        app.world_mut()
+            .register_required_components::<TextBuffer<T>, TextBackgroundColor>();
         app.world_mut()
             .register_required_components::<TextBuffer<T>, MonoFontFaces>();
         app.world_mut()
@@ -121,23 +126,15 @@ impl Plugin for InstancedTextPlugin {
             .register_type::<super::overlay::RectOverlay>()
             .register_type::<super::overlay::RowVertical>()
             .register_type::<TextBounds>()
-            .register_type::<TextColor>()
-            .register_type::<TextBackgroundColor>()
+            // TextColor / TextBackgroundColor are bevy::text types — Bevy registers them.
             .register_type::<TextViewBatchEntity>()
             .register_type::<TextUnderlays>()
             .register_type::<TextOverlays>()
-            .register_type::<VerticalScroll>()
-            .register_type::<HorizontalScroll>()
             .register_type::<ContentMetrics>();
 
         app.register_type::<super::text::TextSpan>();
         // Register the TextSpan content type so simple labels work out of the box.
         app.add_plugins(TextContentPlugin::<super::text::TextSpan>::default());
-
-        app.add_systems(
-            PostUpdate,
-            (animate_vertical_scroll, animate_horizontal_scroll).before(UiSystems::Layout),
-        );
 
         // Ensure there is always a camera marked as the default UI camera so
         // Bevy UI layout can resolve Val::Percent sizes for TextBuffer<T> Node entities.
@@ -170,116 +167,13 @@ impl PluginGroup for InstancedTextPlugins {
     }
 }
 
-// +0.010: pretend the animation already started 10ms ago for an instant visual response.
-// VSCode does the same: startTime = Date.now() - 10, duration = base + 10.
-const SCROLL_BACKDATE_SECS: f32 = 0.010;
-const SCROLL_BACKDATE_DURATION: f32 = 0.010;
-const COMPOSITE_SPLIT: f32 = 0.33;
-const COMPOSITE_VIEWPORT_THRESHOLD: f32 = 2.5;
-const COMPOSITE_STOP_INSET: f32 = 0.75;
-
-pub(crate) fn build_animation(
-    from: f32,
-    to: f32,
-    duration: f32,
-    viewport_size: f32,
-) -> ScrollAnimation {
-    let composite = if viewport_size > 0.0
-        && (to - from).abs() > COMPOSITE_VIEWPORT_THRESHOLD * viewport_size
-    {
-        let inset = COMPOSITE_STOP_INSET * viewport_size;
-        let (stop1, stop2) = if from < to {
-            (from + inset, to - inset)
-        } else {
-            (from - inset, to + inset)
-        };
-        Some(CompositeStops {
-            stop1,
-            stop2,
-            split: COMPOSITE_SPLIT,
-        })
-    } else {
-        None
-    };
-    ScrollAnimation {
-        from,
-        to,
-        elapsed: SCROLL_BACKDATE_SECS,
-        duration: (duration + SCROLL_BACKDATE_DURATION).max(0.001),
-        composite,
-    }
-}
-
-/// Single-axis scroll step. Reads the existing `axis`, advances or rebuilds
-/// the easing animation, returns the new state. Pure — no Bevy types.
-///
-/// `dt` is per-frame delta, `viewport_size` is the relevant axis dimension
-/// (height for vertical, width for horizontal — used to detect "huge jumps"
-/// that warrant the composite curve).
-///
-/// Returns `Some(new_axis)` if the state changed (so the caller writes through
-/// `Mut` and triggers change detection), `None` if nothing moved.
-fn step_axis(axis: &ScrollAxis, dt: f32, viewport_size: f32) -> Option<ScrollAxis> {
-    let mut anim = match &axis.anim {
-        Some(a) if (a.to - axis.target).abs() <= f32::EPSILON => a.clone(),
-        _ if (axis.target - axis.current).abs() > 0.5 => {
-            build_animation(axis.current, axis.target, axis.duration, viewport_size)
-        }
-        // No anim in progress and target is already close to current — nothing to do.
-        _ => return None,
-    };
-
-    let (new_current, finished) = anim.advance(dt);
-    let new_anim = if finished { None } else { Some(anim) };
-
-    let current_changed = (new_current - axis.current).abs() > 1e-4;
-    let anim_state_changed = axis.anim.is_some() != new_anim.is_some();
-    if !current_changed && !anim_state_changed {
-        return None;
-    }
-
-    Some(ScrollAxis {
-        target: axis.target,
-        current: new_current,
-        duration: axis.duration,
-        anim: new_anim,
-    })
-}
-
-fn animate_vertical_scroll(
-    mut query: Query<(&mut VerticalScroll, &ComputedNode), With<DisplayLayout>>,
-    time: Res<Time>,
-) {
-    let dt = time.delta_secs();
-    for (mut axis, computed) in query.iter_mut() {
-        let viewport_h = computed.size().y * computed.inverse_scale_factor();
-        if let Some(next) = step_axis(&axis.0, dt, viewport_h) {
-            axis.0 = next;
-        }
-    }
-}
-
-fn animate_horizontal_scroll(
-    mut query: Query<(&mut HorizontalScroll, &ComputedNode), With<DisplayLayout>>,
-    time: Res<Time>,
-) {
-    let dt = time.delta_secs();
-    for (mut axis, computed) in query.iter_mut() {
-        let viewport_w = computed.size().x * computed.inverse_scale_factor();
-        if let Some(next) = step_axis(&axis.0, dt, viewport_w) {
-            axis.0 = next;
-        }
-    }
-}
-
 #[allow(clippy::type_complexity)]
 pub fn update_text_views(
     mut commands: Commands,
     mut text_views: Query<
         (
             Entity,
-            &VerticalScroll,
-            &HorizontalScroll,
+            &ScrollPosition,
             &ComputedNode,
             &UiGlobalTransform,
             Option<&CalculatedClip>,
@@ -300,7 +194,7 @@ pub fn update_text_views(
     fonts: Res<Assets<bevy::text::Font>>,
 ) {
     let _span = bevy::prelude::info_span!("update_text_views").entered();
-    for (tv_entity, v_scroll, h_scroll, computed, ui_transform, clip, target_cam, font, faces_cfg, text_layout, layout, underlays, overlays, batch_entity_opt, render_layers) in
+    for (tv_entity, scroll, computed, ui_transform, clip, target_cam, font, faces_cfg, text_layout, layout, underlays, overlays, batch_entity_opt, render_layers) in
         text_views.iter_mut()
     {
         let justify = text_layout.map(|t| t.justify).unwrap_or_default();
@@ -366,7 +260,7 @@ pub fn update_text_views(
                 super::render::RenderContext {
                     content_start_x,
                     content_end_inset_x,
-                    horizontal_scroll_offset: h_scroll.current,
+                    horizontal_scroll_offset: scroll.x,
                     font_size: font.font_size,
                     faces,
                     justify,
@@ -379,14 +273,14 @@ pub fn update_text_views(
         let logical = computed.size() * inv;
         let text_area_top = computed.content_inset().min_inset.y * inv;
         let line_height = layout.line_height;
-        let start_pixels = v_scroll.current - text_area_top;
+        let start_pixels = scroll.y - text_area_top;
         let first_visible = (start_pixels / line_height).floor().max(0.0) as usize;
         let visible_count = (logical.y / line_height).ceil() as usize;
         let last_visible = first_visible + visible_count;
 
         let batch_data = TextViewBatch {
-            built_at_scroll: v_scroll.current,
-            built_at_horizontal_scroll: h_scroll.current,
+            built_at_scroll: scroll.y,
+            built_at_horizontal_scroll: scroll.x,
             first_line: first_visible,
             last_line: last_visible,
             built_at_width: logical.x as u32,

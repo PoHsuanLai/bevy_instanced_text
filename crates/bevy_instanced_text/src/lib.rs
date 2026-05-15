@@ -32,8 +32,9 @@
 //! or overlay placement read `DisplayLayout` and the [`RowMetrics`] /
 //! [`BufferAnchorParam`] helpers.
 //!
-//! **Scroll state** ([`VerticalScroll`], [`HorizontalScroll`], [`ContentMetrics`]) is data
-//! only; the engine does not render a scrollbar — attach your own or skip it.
+//! **Scroll state** is [`bevy::ui::ScrollPosition`] — write it to move the
+//! viewport; the engine reads it (and never writes it). Smooth scroll,
+//! scrollbars, and stick-to-bottom behavior belong in the host crate.
 //!
 //! ## Camera setup
 //!
@@ -116,9 +117,9 @@ pub mod prelude {
     pub use crate::view::{
         resolve_line_height, row_metrics, row_metrics_with_baseline, AnchorPoint,
         BufferAnchorParam, ContentMetrics, CornerRadii, FontSynthesis, HiddenLines,
-        HorizontalScroll, InstancedTextPlugin, InstancedTextPlugins, LineStyles, MonoCellWidth,
-        MonoFontFaces, RectOverlay, RowMetrics, RowMetricsParam, RowVertical, RunWithText,
-        ScrollAxis, StyleRun, TextBackgroundColor, TextBounds, TextBuffer, TextColor, TextContent,
-        TextContentPlugin, TextOverlays, TextSpan, TextUnderlays, VerticalScroll,
+        InstancedTextPlugin, InstancedTextPlugins, LineStyles, MonoCellWidth, MonoFontFaces,
+        RectOverlay, RowMetrics, RowMetricsParam, RowVertical, RunWithText, StyleRun,
+        TextBackgroundColor, TextBounds, TextBuffer, TextColor, TextContent, TextContentPlugin,
+        TextOverlays, TextSpan, TextUnderlays,
     };
 }

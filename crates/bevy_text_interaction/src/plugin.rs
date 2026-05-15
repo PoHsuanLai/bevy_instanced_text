@@ -74,22 +74,6 @@ impl<T: TextContent + Component> Plugin for InstancedTextInteractionPlugin<T> {
             app.add_observer(on_pointer_release);
             app.insert_resource(ReleaseObserverRegistered);
         }
-
-        // Instant snap for entities with `ScrollConfig.smooth = false`. Runs
-        // before the engine's smooth-scroll animator, so the animator sees
-        // target == offset and is a no-op for those entities. Registered once.
-        if !app
-            .world()
-            .get_resource::<InstantScrollRegistered>()
-            .is_some()
-        {
-            app.add_systems(
-                Update,
-                apply_instant_scroll
-                    .before(bevy_instanced_text::view::plugin::TextViewRenderSet),
-            );
-            app.insert_resource(InstantScrollRegistered);
-        }
     }
 }
 
@@ -98,33 +82,3 @@ struct RegisteredContentTypes(Vec<std::any::TypeId>);
 
 #[derive(Resource)]
 struct ReleaseObserverRegistered;
-
-#[derive(Resource)]
-struct InstantScrollRegistered;
-
-/// Sync `ScrollConfig.smooth_scroll_duration` onto each axis's `duration`
-/// field, and (when smooth=false) snap each axis's `current` to its
-/// `target` so the engine animator becomes a no-op.
-///
-/// Vertical and horizontal are handled symmetrically — one helper, two
-/// queries — so a future change to one can't drift from the other.
-fn apply_instant_scroll(
-    mut v: Query<(&mut bevy_instanced_text::VerticalScroll, &ScrollConfig)>,
-    mut h: Query<(&mut bevy_instanced_text::HorizontalScroll, &ScrollConfig)>,
-) {
-    for (mut axis, cfg) in v.iter_mut() {
-        sync_axis(&mut axis.0, cfg);
-    }
-    for (mut axis, cfg) in h.iter_mut() {
-        sync_axis(&mut axis.0, cfg);
-    }
-}
-
-fn sync_axis(axis: &mut bevy_instanced_text::ScrollAxis, cfg: &ScrollConfig) {
-    if (axis.duration - cfg.smooth_scroll_duration).abs() > f32::EPSILON {
-        axis.duration = cfg.smooth_scroll_duration;
-    }
-    if !cfg.smooth && (axis.target - axis.current).abs() > 0.001 {
-        axis.current = axis.target;
-    }
-}

@@ -20,11 +20,8 @@ use bevy::picking::pointer::PointerButton;
 use bevy::prelude::*;
 use bevy::ui::ui_transform::UiGlobalTransform;
 
-use bevy::ui::ComputedNode;
-use bevy_instanced_text::{
-    ContentMetrics, DisplayLayout, HorizontalScroll, MonoCellWidth, TextBuffer, TextContent,
-    VerticalScroll,
-};
+use bevy::ui::{ComputedNode, ScrollPosition};
+use bevy_instanced_text::{ContentMetrics, DisplayLayout, MonoCellWidth, TextBuffer, TextContent};
 
 use crate::interaction_states::{ScrollConfig, TextViewDragState};
 use crate::text_state::{CursorState, SelectionState};
@@ -34,8 +31,7 @@ type ScrollQuery<'w, 's, T> = Query<
     's,
     (
         &'static TextBuffer<T>,
-        &'static mut VerticalScroll,
-        &'static mut HorizontalScroll,
+        &'static mut ScrollPosition,
         &'static ContentMetrics,
         &'static ComputedNode,
         &'static TextFont,
@@ -52,7 +48,7 @@ type PressQuery<'w, 's, T> = Query<
     (
         &'static mut TextViewDragState,
         &'static TextBuffer<T>,
-        &'static VerticalScroll,
+        &'static ScrollPosition,
         &'static TextFont,
         &'static bevy::text::LineHeight,
         &'static MonoCellWidth,
@@ -71,7 +67,7 @@ type DragQuery<'w, 's, T> = Query<
     (
         &'static mut TextViewDragState,
         &'static TextBuffer<T>,
-        &'static VerticalScroll,
+        &'static ScrollPosition,
         &'static TextFont,
         &'static bevy::text::LineHeight,
         &'static MonoCellWidth,
@@ -247,7 +243,7 @@ pub fn on_pointer_scroll<T: TextContent + Component>(
     mut views: ScrollQuery<T>,
 ) {
     let entity = trigger.event().entity;
-    let Ok((buffer, mut v_scroll, mut h_scroll, metrics, computed, font, lh, mono, scroll_cfg)) =
+    let Ok((buffer, mut scroll, metrics, computed, font, lh, mono, scroll_cfg)) =
         views.get_mut(entity)
     else {
         return;
@@ -279,9 +275,7 @@ pub fn on_pointer_scroll<T: TextContent + Component>(
         if metrics.max_content_width > available_text_width {
             let scroll_delta = dx * h_delta_per_dx;
             let max_h = (metrics.max_content_width - available_text_width).max(0.0);
-            // Build on the existing target so successive scroll events stack
-            // monotonically; never on `current`, which is mid-animation.
-            h_scroll.target = (h_scroll.target + scroll_delta).clamp(0.0, max_h);
+            scroll.x = (scroll.x + scroll_delta).clamp(0.0, max_h);
         }
     }
 
@@ -291,7 +285,7 @@ pub fn on_pointer_scroll<T: TextContent + Component>(
         let line_count = buffer.line_count();
         let content_height = line_count as f32 * line_height;
         let max_scroll = (content_height - viewport_height + text_area_top).max(0.0);
-        v_scroll.target = (v_scroll.target + scroll_delta).clamp(0.0, max_scroll);
+        scroll.y = (scroll.y + scroll_delta).clamp(0.0, max_scroll);
     }
 }
 
@@ -314,7 +308,7 @@ pub fn on_pointer_press<T: TextContent + Component>(
     let Ok((
         mut drag_state,
         buffer,
-        v_scroll,
+        scroll,
         font,
         lh,
         mono,
@@ -345,7 +339,7 @@ pub fn on_pointer_press<T: TextContent + Component>(
         local_pos,
         &**buffer,
         layout,
-        v_scroll.current,
+        scroll.y,
         mono,
         line_height,
         text_area_left,
@@ -419,7 +413,7 @@ pub fn on_pointer_press<T: TextContent + Component>(
     }
     drag_state.is_dragging = true;
     drag_state.drag_start_pos = Some(char_pos);
-    drag_state.drag_start_scroll_offset = v_scroll.current;
+    drag_state.drag_start_scroll_offset = scroll.y;
     drag_state.last_screen_pos = Some(trigger.event().pointer_location.position);
     input_focus.set(entity);
 }
@@ -466,7 +460,7 @@ pub fn on_pointer_drag<T: TextContent + Component>(
     let Ok((
         mut drag_state,
         buffer,
-        v_scroll,
+        scroll,
         font,
         lh,
         mono,
@@ -502,7 +496,7 @@ pub fn on_pointer_drag<T: TextContent + Component>(
         local_pos,
         &**buffer,
         layout,
-        v_scroll.current,
+        scroll.y,
         mono,
         line_height,
         text_area_left,

@@ -14,9 +14,9 @@ use std::sync::Arc;
 use super::font::MonoCellWidth;
 use super::pipeline::DisplayLayout;
 use super::glyph::{LineShape, ShapedGlyph, ShapedLine, StyleRun};
-use super::text::{ContentMetrics, HorizontalScroll, TextBuffer, TextContent, VerticalScroll};
+use super::text::{ContentMetrics, TextBuffer, TextContent};
 use super::text_style::{HiddenLines, LineStyles, RunWithText, TextBounds};
-use bevy::ui::ComputedNode;
+use bevy::ui::{ComputedNode, ScrollPosition};
 use crate::gpu::GlyphAtlas;
 
 /// Default extra rows kept above and below the visible window.
@@ -96,8 +96,7 @@ pub fn produce_layouts<T: TextContent + Component>(
     mut q: Query<
         (
             &TextBuffer<T>,
-            &VerticalScroll,
-            &HorizontalScroll,
+            &ScrollPosition,
             &mut ContentMetrics,
             &ComputedNode,
             &TextFont,
@@ -108,11 +107,11 @@ pub fn produce_layouts<T: TextContent + Component>(
             Option<&LineStyles>,
             Option<&TextBounds>,
             Option<&super::measurement::LayoutTuning>,
+            &bevy::text::TextColor,
         ),
         Or<(
             Changed<TextBuffer<T>>,
-            Changed<VerticalScroll>,
-            Changed<HorizontalScroll>,
+            Changed<ScrollPosition>,
             Changed<ComputedNode>,
             Changed<TextFont>,
             Changed<bevy::text::LineHeight>,
@@ -120,6 +119,7 @@ pub fn produce_layouts<T: TextContent + Component>(
             Changed<HiddenLines>,
             Changed<LineStyles>,
             Changed<TextBounds>,
+            Changed<bevy::text::TextColor>,
         )>,
     >,
     mut atlas: ResMut<GlyphAtlas>,
@@ -128,8 +128,7 @@ pub fn produce_layouts<T: TextContent + Component>(
     let _span = bevy::prelude::info_span!("produce_layouts").entered();
     for (
         buffer,
-        v_scroll,
-        h_scroll,
+        scroll,
         mut metrics,
         tv_viewport,
         font,
@@ -140,6 +139,7 @@ pub fn produce_layouts<T: TextContent + Component>(
         styles,
         wrap,
         tuning,
+        text_color,
     ) in q.iter_mut()
     {
         let buffer_lines = tuning
@@ -149,15 +149,15 @@ pub fn produce_layouts<T: TextContent + Component>(
         let line_height = crate::view::font::resolve_line_height(*lh, font.font_size);
         let new_layout = build_display_layout(
             &**buffer,
-            v_scroll.current,
-            h_scroll.current,
+            scroll.y,
+            scroll.x,
             &mut metrics,
             tv_viewport,
             font,
             line_height,
             mono,
             wrap,
-            layout.default_fg,
+            text_color.0,
             hidden,
             styles,
             Some(&mut atlas),
@@ -702,8 +702,7 @@ mod tests {
                 TextBuffer::new(crate::view::text::TextSpan::new(
                     "hello world\nsecond line\nthird line\n",
                 )),
-                VerticalScroll::default(),
-                HorizontalScroll::default(),
+                bevy::ui::ScrollPosition::default(),
                 ContentMetrics::default(),
                 test_computed(),
                 test_font(),
@@ -712,6 +711,7 @@ mod tests {
                 DisplayLayout::default(),
                 TextBounds::default(),
                 crate::view::measurement::LayoutTuning::default(),
+                bevy::text::TextColor::default(),
             ))
             .id();
 

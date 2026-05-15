@@ -13,23 +13,23 @@
 //! ```no_run
 //! # use bevy::prelude::*;
 //! # use bevy_instanced_text::prelude::*;
-//! # use bevy_instanced_text::{MonoCellWidth, resolve_line_height, VerticalScroll, HorizontalScroll};
+//! # use bevy_instanced_text::{MonoCellWidth, resolve_line_height};
+//! # use bevy::ui::ScrollPosition;
 //! # use bevy_instanced_text::view::pipeline::DisplayLayout;
 //! # use bevy_instanced_text::view::bounds::row_metrics;
 //! fn position_my_popup(
 //!     editor: Query<(
 //!         &ComputedNode,
-//!         &VerticalScroll,
-//!         &HorizontalScroll,
+//!         &ScrollPosition,
 //!         &TextFont,
 //!         &bevy::text::LineHeight,
 //!         &MonoCellWidth,
 //!         &DisplayLayout,
 //!     )>,
 //! ) {
-//!     let (computed, v_scroll, h_scroll, font, lh, mono, _layout) = editor.single().unwrap();
+//!     let (computed, scroll, font, lh, mono, _layout) = editor.single().unwrap();
 //!     let line_height = resolve_line_height(*lh, font.font_size);
-//!     let metrics = row_metrics(computed, v_scroll, h_scroll, font, line_height, mono);
+//!     let metrics = row_metrics(computed, scroll, font, line_height, mono);
 //!     let band = metrics.row_glyph_band(12);
 //!     let popup_top_left = band.min - bevy::math::Vec2::new(0.0, 100.0);
 //!     // commands.spawn(Node { left: Val::Px(popup_top_left.x), top: Val::Px(popup_top_left.y), .. });
@@ -37,10 +37,9 @@
 //! ```
 
 use bevy::math::{Rect, Vec2};
-use bevy::ui::ComputedNode;
+use bevy::ui::{ComputedNode, ScrollPosition};
 
 use super::font::MonoCellWidth;
-use super::text::{HorizontalScroll, VerticalScroll};
 use bevy::text::TextFont;
 
 /// Default baseline-offset ratio (~32% of font size), matching
@@ -59,6 +58,7 @@ pub struct RowMetrics {
     text_area_top_with_scroll: f32,
     text_area_left: f32,
     viewport_width: f32,
+    viewport_height: f32,
     char_width: f32,
     line_height: f32,
     baseline_offset: f32,
@@ -70,16 +70,15 @@ pub struct RowMetrics {
 /// when a layout is available.
 pub fn row_metrics(
     computed: &ComputedNode,
-    v_scroll: &VerticalScroll,
-    h_scroll: &HorizontalScroll,
+    scroll: &ScrollPosition,
     font: &TextFont,
     line_height: f32,
     mono: &MonoCellWidth,
 ) -> RowMetrics {
     row_metrics_with_baseline(
         computed,
-        v_scroll.current,
-        h_scroll.current,
+        scroll.y,
+        scroll.x,
         line_height,
         mono,
         font.font_size * DEFAULT_BASELINE_OFFSET_RATIO,
@@ -105,6 +104,7 @@ pub fn row_metrics_with_baseline(
         text_area_top_with_scroll: text_area_top - scroll_y,
         text_area_left,
         viewport_width: logical.x,
+        viewport_height: logical.y,
         char_width: mono.px,
         line_height,
         baseline_offset,
@@ -202,6 +202,69 @@ impl RowMetrics {
         self.text_area_left
     }
 
+    /// Display row containing node-local Y coordinate `local_y` (top-left
+    /// origin, +Y down — the same space `Node::top`/`Node::left` consume).
+    /// Returns `None` when `local_y` falls outside the text area or above
+    /// the first row.
+    ///
+    /// Inverse of [`row_y_top`](Self::row_y_top). Use this for click-to-row
+    /// hit-testing on any UI panel — sidebar, list, log, gutter.
+    pub fn pick_row(&self, local_y: f32) -> Option<u32> {
+        if self.line_height <= 0.0 {
+            return None;
+        }
+        let rel = local_y - self.text_area_top_with_scroll;
+        if rel < 0.0 {
+            return None;
+        }
+        Some((rel / self.line_height) as u32)
+    }
+
+    /// Display row containing a Bevy picking [`HitData`] position.
+    ///
+    /// Bevy UI's picking backend reports `hit.position` as a normalized
+    /// `(-0.5, -0.5)..(0.5, 0.5)` Vec3 relative to the node's top-left and
+    /// bottom-right corners. This converts that to node-local pixels and
+    /// calls [`pick_row`](Self::pick_row).
+    ///
+    /// Use from `On<Pointer<Press>>` / `On<Pointer<Click>>` observers
+    /// to get the row that was clicked with one call.
+    ///
+    /// [`HitData`]: bevy::picking::backend::HitData
+    pub fn pick_row_from_hit(&self, hit: &bevy::picking::backend::HitData) -> Option<u32> {
+        let norm = hit.position?;
+        let local_y = (norm.y + 0.5) * self.viewport_height;
+        self.pick_row(local_y)
+    }
+
+    /// Monospace column containing a Bevy picking [`HitData`] position.
+    /// See [`pick_row_from_hit`](Self::pick_row_from_hit) for the position
+    /// convention.
+    ///
+    /// [`HitData`]: bevy::picking::backend::HitData
+    pub fn pick_column_from_hit(&self, hit: &bevy::picking::backend::HitData) -> Option<u32> {
+        let norm = hit.position?;
+        let local_x = (norm.x + 0.5) * self.viewport_width;
+        self.pick_column(local_x)
+    }
+
+    /// Monospace column containing node-local X coordinate `local_x`.
+    /// Returns `None` when `local_x` falls left of the text area.
+    ///
+    /// Pairs with [`pick_row`](Self::pick_row) for click-to-cell hit-testing
+    /// in monospace contexts (terminals, gutters, fixed-pitch tables).
+    /// For shaped text, walk `DisplayLayout` runs instead.
+    pub fn pick_column(&self, local_x: f32) -> Option<u32> {
+        if self.char_width <= 0.0 {
+            return None;
+        }
+        let rel = local_x - self.text_area_left + self.horizontal_scroll;
+        if rel < 0.0 {
+            return None;
+        }
+        Some((rel / self.char_width) as u32)
+    }
+
     fn row_content_width(&self) -> f32 {
         (self.viewport_width - self.text_area_left).max(0.0)
     }
@@ -232,8 +295,7 @@ pub struct RowMetricsParam<'w, 's> {
         (
             bevy::ecs::entity::Entity,
             &'static bevy::ui::ComputedNode,
-            &'static VerticalScroll,
-            &'static HorizontalScroll,
+            &'static ScrollPosition,
             &'static TextFont,
             &'static bevy::text::LineHeight,
             &'static MonoCellWidth,
@@ -245,12 +307,12 @@ pub struct RowMetricsParam<'w, 's> {
 impl<'w, 's> RowMetricsParam<'w, 's> {
     /// `RowMetrics` for `entity`, or `None` if a required component is missing.
     pub fn get(&self, entity: bevy::ecs::entity::Entity) -> Option<RowMetrics> {
-        let (_, computed, v_scroll, h_scroll, font, lh, mono, layout) = self.query.get(entity).ok()?;
+        let (_, computed, scroll, font, lh, mono, layout) = self.query.get(entity).ok()?;
         let line_height = crate::view::font::resolve_line_height(*lh, font.font_size);
         let baseline = layout
             .map(|l| l.baseline_offset)
             .unwrap_or(font.font_size * DEFAULT_BASELINE_OFFSET_RATIO);
-        Some(row_metrics_with_baseline(computed, v_scroll.current, h_scroll.current, line_height, mono, baseline))
+        Some(row_metrics_with_baseline(computed, scroll.y, scroll.x, line_height, mono, baseline))
     }
 
     /// [`get`](Self::get) that panics on missing components.
@@ -258,7 +320,7 @@ impl<'w, 's> RowMetricsParam<'w, 's> {
         self.get(entity).unwrap_or_else(|| {
             panic!(
                 "RowMetricsParam: entity {:?} is missing one of \
-                 (ComputedNode, VerticalScroll, HorizontalScroll, TextFont, LineHeight, MonoCellWidth)",
+                 (ComputedNode, ScrollPosition, TextFont, LineHeight, MonoCellWidth)",
                 entity
             )
         })
@@ -268,14 +330,14 @@ impl<'w, 's> RowMetricsParam<'w, 's> {
     pub fn iter(&self) -> impl Iterator<Item = (bevy::ecs::entity::Entity, RowMetrics)> + '_ {
         self.query
             .iter()
-            .map(|(entity, computed, v_scroll, h_scroll, font, lh, mono, layout)| {
+            .map(|(entity, computed, scroll, font, lh, mono, layout)| {
                 let line_height = crate::view::font::resolve_line_height(*lh, font.font_size);
                 let baseline = layout
                     .map(|l| l.baseline_offset)
                     .unwrap_or(font.font_size * DEFAULT_BASELINE_OFFSET_RATIO);
                 (
                     entity,
-                    row_metrics_with_baseline(computed, v_scroll.current, h_scroll.current, line_height, mono, baseline),
+                    row_metrics_with_baseline(computed, scroll.y, scroll.x, line_height, mono, baseline),
                 )
             })
     }
@@ -332,6 +394,74 @@ mod tests {
                 band.max.y,
                 engine_band_bot,
             );
+        }
+    }
+
+    /// `pick_row` is the inverse of `row_y_top`: the Y at any point inside
+    /// row N must round-trip back to N, and the boundary at `y_top(N)`
+    /// belongs to row N (not N-1).
+    #[test]
+    fn pick_row_inverts_row_y_top() {
+        let metrics = make_metrics();
+        for row in [0u32, 1, 5, 12, 50] {
+            let y_top = metrics.row_y_top(row);
+            let y_mid = y_top + metrics.line_height * 0.5;
+            let y_just_below_top = y_top + 0.001;
+            assert_eq!(metrics.pick_row(y_top), Some(row), "row {row} top boundary");
+            assert_eq!(metrics.pick_row(y_just_below_top), Some(row), "row {row} just inside");
+            assert_eq!(metrics.pick_row(y_mid), Some(row), "row {row} midpoint");
+        }
+    }
+
+    /// Y above the text area returns `None` rather than wrapping to a high
+    /// row index — callers can distinguish "missed" from "row 0".
+    #[test]
+    fn pick_row_rejects_above_text_area() {
+        let metrics = make_metrics();
+        // text_area_top_with_scroll = 8.0 - 100.0 = -92.0, so anything below
+        // that is in row 0 (scrolled). Pick a y that's clearly above.
+        let y_above = metrics.text_area_top_with_scroll - 10.0;
+        assert!(metrics.pick_row(y_above).is_none());
+    }
+
+    /// `pick_row_from_hit` decodes Bevy's normalized hit position and
+    /// matches what `pick_row` would give for the equivalent local Y.
+    /// This is the path picking observers take, so any drift between the
+    /// two would surface as off-by-one rows under clicks.
+    #[test]
+    fn pick_row_from_hit_matches_pick_row() {
+        use bevy::picking::backend::HitData;
+        use bevy::math::Vec3;
+        use bevy::prelude::Entity;
+        let metrics = make_metrics();
+        // viewport_height = 600 (from make_metrics).
+        // norm.y = -0.5 → local_y = 0; norm.y = 0.0 → local_y = 300; etc.
+        for norm_y in [-0.4f32, -0.1, 0.0, 0.25, 0.49] {
+            let hit = HitData::new(
+                Entity::PLACEHOLDER,
+                0.0,
+                Some(Vec3::new(0.0, norm_y, 0.0)),
+                None,
+            );
+            let local_y = (norm_y + 0.5) * 600.0;
+            assert_eq!(
+                metrics.pick_row_from_hit(&hit),
+                metrics.pick_row(local_y),
+                "norm_y={norm_y} local_y={local_y}",
+            );
+        }
+    }
+
+    /// `pick_column` inverts the column-to-x mapping for monospace cells,
+    /// accounting for horizontal scroll and text area inset.
+    #[test]
+    fn pick_column_inverts_cell_top_left() {
+        let metrics = make_metrics();
+        for col in [0u32, 1, 7, 25] {
+            let pos = metrics.cell_top_left(0, col);
+            // pos.x is in node-local space; pick_column should recover col.
+            assert_eq!(metrics.pick_column(pos.x + 0.001), Some(col));
+            assert_eq!(metrics.pick_column(pos.x + metrics.char_width * 0.5), Some(col));
         }
     }
 
@@ -394,18 +524,17 @@ mod tests {
         computed.size = bevy::math::Vec2::new(800.0, 600.0);
         computed.inverse_scale_factor = 1.0;
         computed.padding.min_inset = bevy::math::Vec2::new(50.0, 8.0);
-        let v_scroll = VerticalScroll(crate::view::text::ScrollAxis { current: 100.0, ..Default::default() });
-        let h_scroll = HorizontalScroll::default();
+        let scroll = ScrollPosition(bevy::math::Vec2::new(0.0, 100.0));
         let font = bevy::text::TextFont::from_font_size(14.0);
         let line_height_comp = bevy::text::LineHeight::Px(21.0);
         let mono = MonoCellWidth { px: 8.4 };
         let mut layout = DisplayLayout::default();
         layout.baseline_offset = 14.0 * 0.32;
 
-        let direct = row_metrics_with_baseline(&computed, v_scroll.current, h_scroll.current, 21.0, &mono, layout.baseline_offset);
+        let direct = row_metrics_with_baseline(&computed, scroll.y, scroll.x, 21.0, &mono, layout.baseline_offset);
 
         let entity = world
-            .spawn((computed, v_scroll, h_scroll, font.clone(), line_height_comp, mono, layout.clone()))
+            .spawn((computed, scroll, font.clone(), line_height_comp, mono, layout.clone()))
             .id();
 
         let result = world
