@@ -89,8 +89,6 @@ impl<T: TextContent + Component> Plugin for TextContentPlugin<T> {
         app.world_mut()
             .register_required_components::<TextBuffer<T>, Node>();
         app.world_mut()
-            .register_required_components::<TextBuffer<T>, Transform>();
-        app.world_mut()
             .register_required_components::<TextBuffer<T>, Visibility>();
         app.world_mut()
             .register_required_components_with::<TextBuffer<T>, InheritedVisibility>(|| {
