@@ -11,7 +11,7 @@
 //! - **Terminal** (bevsterm) — depend on this crate; spawn
 //!   [`InstancedTextInteractionPlugin::<TextSpan>::default()`] to get
 //!   click-to-place selection, drag-select, scroll, Cmd+C copy.
-//! - **Editor** (bevscode, via `bevy_text_editor`) — gets this plus
+//! - **Editor** (bevscode, via `bevy_instanced_text_editor`) — gets this plus
 //!   rope-backed editing, undo, multi-cursor expansion.
 //!
 //! ## Key components

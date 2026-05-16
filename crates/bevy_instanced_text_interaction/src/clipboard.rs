@@ -12,7 +12,7 @@
 //!
 //! ```rust,no_run
 //! use bevy::prelude::*;
-//! use bevy_text_interaction::{ClipboardProvider, ClipboardResource};
+//! use bevy_instanced_text_interaction::{ClipboardProvider, ClipboardResource};
 //!
 //! #[derive(Default)]
 //! struct InMemoryClipboard(std::sync::Mutex<String>);

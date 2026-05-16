@@ -3,7 +3,7 @@
 //! [`InstancedTextInteractionPlugin<T>`] is generic over the content type
 //! `T: TextContent + Component`. Each consumer registers the plugin once for
 //! every content type they want interactive — terminals add `<TextSpan>`,
-//! editors add `<RopeBuffer>` (via [`bevy_text_editor`]'s editor plugin).
+//! editors add `<RopeBuffer>` (via [`bevy_instanced_text_editor`]'s editor plugin).
 
 use std::marker::PhantomData;
 
