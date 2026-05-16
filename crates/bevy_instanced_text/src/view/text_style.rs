@@ -8,7 +8,7 @@ use bevy::prelude::*;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use super::glyph::StyleRun;
+use super::glyph::TextFormat;
 
 /// Optional Component on a `TextView` entity selecting which buffer lines
 /// the engine renders. Absent ⇒ every line is visible.
@@ -92,5 +92,5 @@ impl Default for TextBounds {
 #[derive(Clone, Debug)]
 pub struct RunWithText {
     pub text: String,
-    pub run: StyleRun,
+    pub run: TextFormat,
 }

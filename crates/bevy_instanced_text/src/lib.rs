@@ -20,7 +20,7 @@
 //!
 //! - **[`TextFont`]** — font path, size, and line height.
 //! - **[`TextColor`]** / **[`TextBackgroundColor`]** — foreground and background colors.
-//! - **[`LineStyles`]** — per-line [`StyleRun`] lists (colors, bold, italic,
+//! - **[`LineStyles`]** — per-line [`TextFormat`] lists (colors, bold, italic,
 //!   inline backgrounds). Producers write this; the engine reads it.
 //! - **[`HiddenLines`]** — which buffer lines to skip (e.g. folded regions).
 //! - **[`TextBounds`]** — optional soft-wrap budget in pixels.
@@ -118,8 +118,8 @@ pub mod prelude {
         resolve_line_height, row_metrics, row_metrics_with_baseline, AnchorPoint,
         BufferAnchorParam, ContentMetrics, CornerRadii, FontSynthesis, HiddenLines,
         InstancedTextPlugin, InstancedTextPlugins, LineStyles, MonoCellWidth, MonoFontFaces,
-        RectOverlay, RowMetrics, RowMetricsParam, RowVertical, RunWithText, StyleRun,
+        RectOverlay, RowMetrics, RowMetricsParam, RowVertical, RunWithText,
         TextBackgroundColor, TextBounds, TextBuffer, TextColor, TextContent, TextContentPlugin,
-        TextOverlays, TextSpan, TextUnderlays,
+        TextFormat, TextOverlays, TextSpan, TextUnderlays,
     };
 }

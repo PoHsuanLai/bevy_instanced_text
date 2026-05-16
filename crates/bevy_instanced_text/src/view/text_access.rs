@@ -13,7 +13,7 @@ use std::sync::Arc;
 
 use super::font::MonoCellWidth;
 use super::pipeline::DisplayLayout;
-use super::glyph::{LineShape, ShapedGlyph, ShapedLine, StyleRun};
+use super::glyph::{LineShape, ShapedGlyph, ShapedLine, TextFormat};
 use super::text::{ContentMetrics, TextBuffer, TextContent};
 use super::text_style::{HiddenLines, LineStyles, RunWithText, TextBounds};
 use bevy::ui::{ComputedNode, ScrollPosition};
@@ -255,7 +255,7 @@ pub(crate) fn build_display_layout(
         let styled = line_style_runs(buffer_line as u32);
         let line_bg = styled.iter().find_map(|s| s.run.bg);
 
-        let mut runs: Vec<StyleRun> = Vec::with_capacity(styled.len());
+        let mut runs: Vec<TextFormat> = Vec::with_capacity(styled.len());
         let mut byte_cursor = 0usize;
         let mut concat = String::new();
         for r in &styled {
@@ -400,7 +400,7 @@ pub(crate) fn build_display_layout(
 #[derive(Clone, Debug)]
 pub struct WrapRow {
     pub text: String,
-    pub runs: Vec<StyleRun>,
+    pub runs: Vec<TextFormat>,
     pub glyphs: Vec<ShapedGlyph>,
     pub width: f32,
     /// Byte offset within the source buffer line where this row's `text` starts.
@@ -412,7 +412,7 @@ pub struct WrapRow {
 /// `text`; emitted rows carry sliced text/runs and per-row local glyph x.
 pub fn wrap_into_rows(
     text: &str,
-    runs: &[StyleRun],
+    runs: &[TextFormat],
     shape: &LineShape,
     budget: f32,
 ) -> Vec<WrapRow> {
@@ -518,7 +518,7 @@ pub fn wrap_into_rows(
 }
 
 /// Clip and rebase a slice of runs to a byte sub-range.
-pub fn slice_runs(runs: &[StyleRun], range: std::ops::Range<usize>) -> Vec<StyleRun> {
+pub fn slice_runs(runs: &[TextFormat], range: std::ops::Range<usize>) -> Vec<TextFormat> {
     let mut out = Vec::new();
     for run in runs {
         if run.byte_range.end <= range.start || run.byte_range.start >= range.end {
@@ -529,7 +529,7 @@ pub fn slice_runs(runs: &[StyleRun], range: std::ops::Range<usize>) -> Vec<Style
         if s >= e {
             continue;
         }
-        out.push(StyleRun {
+        out.push(TextFormat {
             byte_range: s..e,
             fg: run.fg,
             bg: run.bg,

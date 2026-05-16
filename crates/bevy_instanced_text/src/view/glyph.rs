@@ -41,7 +41,7 @@ pub struct LineShape {
 }
 
 bitflags::bitflags! {
-    /// Text decorations applied across a `StyleRun`. Flags can be combined
+    /// Text decorations applied across a `TextFormat`. Flags can be combined
     /// (e.g. `TextDecoration::UNDERLINE | TextDecoration::STRIKETHROUGH`).
     #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
     pub struct TextDecoration: u8 {
@@ -63,7 +63,7 @@ bitflags::bitflags! {
 /// foreground color and italic skew leaves weight / family / decoration / link
 /// all `None` and pays nothing extra.
 #[derive(Clone, Debug)]
-pub struct StyleRun {
+pub struct TextFormat {
     /// Byte range within the parent `ShapedLine.text`. Sorted, non-overlapping.
     pub byte_range: Range<usize>,
     pub fg: Color,
@@ -99,8 +99,10 @@ pub struct StyleRun {
     pub link: Option<Arc<str>>,
 }
 
-impl StyleRun {
-    pub fn fg_only(byte_range: Range<usize>, fg: Color) -> Self {
+impl TextFormat {
+    /// Foreground-only format. Every other field stays at its layout default;
+    /// chain `.with_*` / `.italic()` to layer on more attributes.
+    pub fn fg(byte_range: Range<usize>, fg: Color) -> Self {
         Self {
             byte_range,
             fg,
@@ -114,6 +116,51 @@ impl StyleRun {
             decoration: TextDecoration::empty(),
             link: None,
         }
+    }
+
+    pub fn with_bg(mut self, bg: Color) -> Self {
+        self.bg = Some(bg);
+        self
+    }
+
+    pub fn with_scale(mut self, font_scale: f32) -> Self {
+        self.font_scale = font_scale;
+        self
+    }
+
+    pub fn with_skew(mut self, skew: f32) -> Self {
+        self.skew = skew;
+        self
+    }
+
+    pub fn with_corner_radius(mut self, corner_radius: f32) -> Self {
+        self.corner_radius = corner_radius;
+        self
+    }
+
+    pub fn with_weight(mut self, font_weight: u16) -> Self {
+        self.font_weight = Some(font_weight);
+        self
+    }
+
+    pub fn italic(mut self) -> Self {
+        self.italic = true;
+        self
+    }
+
+    pub fn with_font(mut self, font: bevy::asset::Handle<bevy::text::Font>) -> Self {
+        self.font = Some(font);
+        self
+    }
+
+    pub fn with_decoration(mut self, decoration: TextDecoration) -> Self {
+        self.decoration = decoration;
+        self
+    }
+
+    pub fn with_link(mut self, link: impl Into<Arc<str>>) -> Self {
+        self.link = Some(link.into());
+        self
     }
 }
 
@@ -147,7 +194,7 @@ pub struct ShapedLine {
     pub text: String,
     /// Styled runs covering `text`. Sorted by `byte_range.start`, non-overlapping.
     /// Empty = render as plain text using the layout's default foreground.
-    pub runs: Vec<StyleRun>,
+    pub runs: Vec<TextFormat>,
     /// Optional full-line background.
     pub line_bg: Option<Color>,
     /// Per-row line-height override in pixels. `None` = use the layout's

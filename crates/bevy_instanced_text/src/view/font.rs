@@ -37,7 +37,7 @@ impl Default for FontSynthesis {
 ///
 /// Works the same way as Bevy's per-`TextSpan` font swapping: load each face
 /// as a separate asset and assign the handle here. The renderer picks the
-/// appropriate face per `StyleRun` based on `font_weight` / `italic` flags,
+/// appropriate face per `TextFormat` based on `font_weight` / `italic` flags,
 /// falling back toward `TextFont::font` (the regular face) when a slot is
 /// empty. When a face is missing and the corresponding synthesis flag is set,
 /// the renderer approximates it (double-draw for bold, shear for italic).

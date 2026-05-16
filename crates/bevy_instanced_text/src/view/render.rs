@@ -16,11 +16,11 @@ use crate::gpu::GlyphAtlas;
 use super::font::FontSynthesis;
 use super::pipeline::{line_x_at_byte, DisplayLayout};
 use super::overlay::RectOverlay;
-use super::glyph::{ShapedLine, StyleRun, TextDecoration};
+use super::glyph::{ShapedLine, TextFormat, TextDecoration};
 use bevy::ui::ComputedNode;
 
 /// Resolved font faces for one render call. The renderer picks per-run
-/// based on `StyleRun.font_weight` (≥600 ⇒ bold) and `StyleRun.italic`,
+/// based on `TextFormat.font_weight` (≥600 ⇒ bold) and `TextFormat.italic`,
 /// falling back to `regular` and synthesizing the missing axis when
 /// `synthesis` permits.
 ///
@@ -86,9 +86,9 @@ impl FontFaces {
     }
 }
 
-/// Map a `StyleRun.font_weight` to "bold or not". CSS-style threshold:
+/// Map a `TextFormat.font_weight` to "bold or not". CSS-style threshold:
 /// `>= 600` is bold (semibold and above).
-fn run_is_bold(run: &StyleRun) -> bool {
+fn run_is_bold(run: &TextFormat) -> bool {
     matches!(run.font_weight, Some(w) if w >= 600)
 }
 
@@ -557,7 +557,7 @@ struct RunMetrics {
 
 /// Emit glyphs for a byte range by shaping it on demand. Used when no
 /// `LineShape` is attached (`trivial_layout` consumers) or when a
-/// `StyleRun.font_scale` override requires re-shaping at a different size.
+/// `TextFormat.font_scale` override requires re-shaping at a different size.
 ///
 /// Shaping a per-frame slice is cheap — it's the same code path the producer
 /// uses, just narrowed to the run. For monospace ASCII it yields advances
@@ -595,7 +595,7 @@ fn emit_unshaped_run_glyphs(
 #[allow(clippy::too_many_arguments)]
 fn emit_run_with_bg(
     line: &ShapedLine,
-    run: &StyleRun,
+    run: &TextFormat,
     anchor: RowAnchor,
     style: RunStyle,
     seg_x_start: f32,
@@ -653,7 +653,7 @@ fn emit_run_with_bg(
 #[allow(clippy::too_many_arguments)]
 fn emit_run_glyphs_only(
     line: &ShapedLine,
-    run: &StyleRun,
+    run: &TextFormat,
     anchor: RowAnchor,
     style: RunStyle,
     seg_x_start: f32,

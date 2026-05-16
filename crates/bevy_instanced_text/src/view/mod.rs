@@ -28,7 +28,7 @@ pub use plugin::{
     TextViewRenderSet,
 };
 pub use render::{BatchTransform, GlyphBatchComponent, GlyphInstance};
-pub use glyph::{ShapedLine, StyleRun, TextDecoration};
+pub use glyph::{ShapedLine, TextDecoration, TextFormat};
 pub use text::{ContentMetrics, TextBuffer, TextContent, TextSpan};
 pub use text_style::{HiddenLines, LineStyles, RunWithText, TextBounds};
 pub use bevy::text::{TextBackgroundColor, TextColor};
