@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/bevy_instanced_text",
     "crates/bevy_instanced_text_interaction",
+    "examples",
 ]
 
 [profile.release]

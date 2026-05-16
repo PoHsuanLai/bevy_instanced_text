@@ -1,0 +1,38 @@
+[package]
+name = "examples"
+version = "0.0.0"
+edition = "2021"
+publish = false
+description = "Examples for bevy_instanced_text and bevy_instanced_text_interaction."
+
+[dependencies]
+bevy = { version = "0.18", default-features = false, features = [
+    "bevy_render",
+    "bevy_core_pipeline",
+    "bevy_asset",
+    "bevy_text",
+    "default_font",
+    "bevy_sprite",
+    "bevy_sprite_render",
+    "bevy_color",
+    "bevy_mesh",
+    "bevy_camera",
+    "bevy_input_focus",
+    "bevy_picking",
+    "bevy_ui",
+    "bevy_window",
+    "bevy_winit",
+    "bevy_log",
+    "multi_threaded",
+] }
+
+bevy_instanced_text = { path = "../crates/bevy_instanced_text" }
+bevy_instanced_text_interaction = { path = "../crates/bevy_instanced_text_interaction" }
+
+[[example]]
+name = "text_view"
+path = "text_view.rs"
+
+[[example]]
+name = "ui_inspector"
+path = "ui_inspector.rs"
