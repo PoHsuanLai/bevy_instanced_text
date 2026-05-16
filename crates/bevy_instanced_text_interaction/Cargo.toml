@@ -5,7 +5,7 @@ edition = "2021"
 authors = ["PoHsuanLai"]
 license = "MIT OR Apache-2.0"
 description = "Shared UI primitives for bevy_instanced_text views: clipboard, selection, caret rendering, picking observers. No ropey dependency — terminals, labels, and editors all consume from here."
-repository = "https://github.com/PoHsuanLai/bevscode"
+repository = "https://github.com/PoHsuanLai/bevy_instanced_text"
 keywords = ["bevy", "text", "selection", "clipboard", "picking"]
 categories = ["game-development"]
 
