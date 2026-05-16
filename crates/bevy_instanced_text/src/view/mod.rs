@@ -30,5 +30,5 @@ pub use plugin::{
 pub use render::{BatchTransform, GlyphBatchComponent, GlyphInstance};
 pub use glyph::{ShapedLine, TextDecoration, TextFormat};
 pub use text::{ContentMetrics, TextBuffer, TextContent, TextSpan};
-pub use text_style::{HiddenLines, LineStyles, RunWithText, TextBounds};
+pub use text_style::{FormattedSpan, HiddenLines, LineStyles, TextBounds};
 pub use bevy::text::{TextBackgroundColor, TextColor};

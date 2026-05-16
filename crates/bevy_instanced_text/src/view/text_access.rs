@@ -15,7 +15,7 @@ use super::font::MonoCellWidth;
 use super::pipeline::DisplayLayout;
 use super::glyph::{LineShape, ShapedGlyph, ShapedLine, TextFormat};
 use super::text::{ContentMetrics, TextBuffer, TextContent};
-use super::text_style::{HiddenLines, LineStyles, RunWithText, TextBounds};
+use super::text_style::{HiddenLines, LineStyles, FormattedSpan, TextBounds};
 use bevy::ui::{ComputedNode, ScrollPosition};
 use crate::gpu::GlyphAtlas;
 
@@ -199,7 +199,7 @@ pub(crate) fn build_display_layout(
 
     let line_visible =
         |buffer_line: usize| -> bool { hidden.map(|h| h.is_visible(buffer_line)).unwrap_or(true) };
-    let line_style_runs = |buffer_line: u32| -> Vec<RunWithText> {
+    let line_style_runs = |buffer_line: u32| -> Vec<FormattedSpan> {
         styles
             .and_then(|s| s.get(buffer_line))
             .cloned()
@@ -253,7 +253,7 @@ pub(crate) fn build_display_layout(
         let line_text: String = buffer.line(buffer_line).into_owned();
 
         let styled = line_style_runs(buffer_line as u32);
-        let line_bg = styled.iter().find_map(|s| s.run.bg);
+        let line_bg = styled.iter().find_map(|s| s.format.bg);
 
         let mut runs: Vec<TextFormat> = Vec::with_capacity(styled.len());
         let mut byte_cursor = 0usize;
@@ -264,9 +264,9 @@ pub(crate) fn build_display_layout(
                 continue;
             }
             concat.push_str(&r.text);
-            let mut run = r.run.clone();
-            run.byte_range = byte_cursor..byte_cursor + len;
-            runs.push(run);
+            let mut format = r.format.clone();
+            format.byte_range = byte_cursor..byte_cursor + len;
+            runs.push(format);
             byte_cursor += len;
         }
 

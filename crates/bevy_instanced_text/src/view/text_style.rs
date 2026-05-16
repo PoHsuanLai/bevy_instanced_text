@@ -43,18 +43,18 @@ impl HiddenLines {
 pub struct LineStyles {
     /// Maps `buffer_line → styled runs`. Sparse: only the visible window is
     /// populated. Lines absent from the map render plain.
-    pub by_line: Arc<HashMap<u32, Vec<RunWithText>>>,
+    pub by_line: Arc<HashMap<u32, Vec<FormattedSpan>>>,
 }
 
 impl LineStyles {
-    pub fn new(by_line: HashMap<u32, Vec<RunWithText>>) -> Self {
+    pub fn new(by_line: HashMap<u32, Vec<FormattedSpan>>) -> Self {
         Self {
             by_line: Arc::new(by_line),
         }
     }
 
     /// Returns the runs for `buffer_line`, or `None` if it isn't styled.
-    pub fn get(&self, buffer_line: u32) -> Option<&Vec<RunWithText>> {
+    pub fn get(&self, buffer_line: u32) -> Option<&Vec<FormattedSpan>> {
         self.by_line.get(&buffer_line)
     }
 }
@@ -82,15 +82,15 @@ impl Default for TextBounds {
     }
 }
 
-/// One styled run plus its text payload, the element type of [`LineStyles`].
-/// Producers concatenate `text` payloads to form the line that gets shaped;
-/// the engine then rebases each run's `byte_range` to match.
+/// One styled span: text payload plus its format. The element type of
+/// [`LineStyles`].
 ///
-/// `run.byte_range` on input is ignored — the engine overwrites it with the
-/// correct range based on the position of `text` in the concatenation. Set
-/// it to `0..0` (or anything) when constructing.
+/// Producers concatenate `text` payloads to form the line that gets shaped;
+/// the engine then rebases each span's `format.byte_range` to match its
+/// position in the concatenation. `format.byte_range` on input is ignored —
+/// set it to `0..0` (or anything) when constructing.
 #[derive(Clone, Debug)]
-pub struct RunWithText {
+pub struct FormattedSpan {
     pub text: String,
-    pub run: TextFormat,
+    pub format: TextFormat,
 }
