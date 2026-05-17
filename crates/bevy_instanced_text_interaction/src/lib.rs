@@ -55,7 +55,9 @@ pub use focus::{
     copy_selection, on_focused_keyboard, on_pointer_drag, on_pointer_press, on_pointer_release,
     on_pointer_scroll, screen_to_char_pos, selection_text, InteractionSettings,
 };
-pub use interaction_states::{ScrollConfig, ScrollbarConfig, ScrollbarVisibility, TextViewDragState};
+pub use interaction_states::{
+    ScrollConfig, ScrollbarConfig, ScrollbarVisibility, TextViewDragState,
+};
 pub use key_repeat::{KeyRepeatSettings, KeyRepeatState};
 pub use plugin::InstancedTextInteractionPlugin;
 pub use selection::{Selection, SelectionCollection, SelectionMode, DEFAULT_SEMANTIC_ESCAPE_CHARS};

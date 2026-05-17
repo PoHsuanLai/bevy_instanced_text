@@ -34,7 +34,7 @@ type ScrollQuery<'w, 's, T> = Query<
         &'static mut ScrollPosition,
         &'static ContentMetrics,
         &'static ComputedNode,
-        &'static TextFont,
+        &'static mut TextFont,
         &'static bevy::text::LineHeight,
         &'static MonoCellWidth,
         Option<&'static ScrollConfig>,
@@ -255,9 +255,10 @@ fn block_slice<T: TextContent>(content: &T, start: usize, end: usize) -> String 
 pub fn on_pointer_scroll<T: TextContent + Component>(
     trigger: On<Pointer<Scroll>>,
     mut views: ScrollQuery<T>,
+    keyboard: Res<ButtonInput<KeyCode>>,
 ) {
     let entity = trigger.event().entity;
-    let Ok((buffer, mut scroll, metrics, computed, font, lh, mono, scroll_cfg)) =
+    let Ok((buffer, mut scroll, metrics, computed, mut font, lh, mono, scroll_cfg)) =
         views.get_mut(entity)
     else {
         return;
@@ -267,8 +268,33 @@ pub fn on_pointer_scroll<T: TextContent + Component>(
     let scroll_cfg = scroll_cfg.unwrap_or(&default_scroll);
 
     let unit = trigger.event().unit;
-    let dx = trigger.event().x;
-    let dy = trigger.event().y;
+    let mut dx = trigger.event().x;
+    let mut dy = trigger.event().y;
+
+    let ctrl_held = keyboard.pressed(KeyCode::ControlLeft)
+        || keyboard.pressed(KeyCode::ControlRight)
+        || keyboard.pressed(KeyCode::SuperLeft)
+        || keyboard.pressed(KeyCode::SuperRight);
+    if scroll_cfg.mouse_wheel_zoom && ctrl_held && dy.abs() > 0.0 {
+        let step = dy.signum();
+        font.font_size = (font.font_size + step).clamp(6.0, 96.0);
+        return;
+    }
+
+    let alt_held = keyboard.pressed(KeyCode::AltLeft) || keyboard.pressed(KeyCode::AltRight);
+    let speed_multiplier = if alt_held {
+        scroll_cfg.fast_scroll_sensitivity.max(1.0)
+    } else {
+        1.0
+    };
+
+    if scroll_cfg.scroll_predominant_axis {
+        if dx.abs() > dy.abs() {
+            dy = 0.0;
+        } else if dy.abs() > dx.abs() {
+            dx = 0.0;
+        }
+    }
 
     let inv = computed.inverse_scale_factor();
     let viewport_width = computed.size().x * inv;
@@ -279,29 +305,31 @@ pub fn on_pointer_scroll<T: TextContent + Component>(
 
     let (v_delta_per_dy, h_delta_per_dx) = match unit {
         MouseScrollUnit::Line => (
-            line_height * scroll_cfg.mouse_wheel_scroll_sensitivity,
-            mono.px * scroll_cfg.mouse_wheel_scroll_sensitivity,
+            line_height * scroll_cfg.mouse_wheel_scroll_sensitivity * speed_multiplier,
+            mono.px * scroll_cfg.mouse_wheel_scroll_sensitivity * speed_multiplier,
         ),
-        // Pixel-unit deltas are already in logical pixels; no speed multiplier.
-        MouseScrollUnit::Pixel => (1.0, 1.0),
+        MouseScrollUnit::Pixel => (speed_multiplier, speed_multiplier),
     };
 
-    // Horizontal scroll — only when content overflows.
     if dx.abs() > 0.0 {
         let available_text_width = viewport_width - text_area_left;
         if metrics.max_content_width > available_text_width {
             let scroll_delta = dx * h_delta_per_dx;
-            let max_h = (metrics.max_content_width - available_text_width).max(0.0);
+            let beyond = scroll_cfg.scroll_beyond_last_column as f32 * mono.px;
+            let max_h = (metrics.max_content_width + beyond - available_text_width).max(0.0);
             scroll.x = (scroll.x + scroll_delta).clamp(0.0, max_h);
         }
     }
 
-    // Vertical scroll. Positive = down.
     if dy.abs() > 0.0 {
         let scroll_delta = -dy * v_delta_per_dy;
         let line_count = buffer.line_count();
         let content_height = line_count as f32 * line_height;
-        let max_scroll = (content_height - viewport_height + text_area_top).max(0.0);
+        let max_scroll = if scroll_cfg.scroll_beyond_last_line {
+            (content_height - line_height + text_area_top).max(0.0)
+        } else {
+            (content_height - viewport_height + text_area_top).max(0.0)
+        };
         scroll.y = (scroll.y + scroll_delta).clamp(0.0, max_scroll);
     }
 }
