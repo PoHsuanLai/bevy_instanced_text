@@ -29,39 +29,81 @@ use crate::key_repeat::KeyRepeatSettings;
 #[reflect(Component, Default, Debug)]
 pub struct CursorSettings {
     pub style: CursorStyle,
+    pub blinking: CursorBlinkingMode,
+    pub smooth_caret_animation: SmoothCaretAnimation,
     /// In pixels; for `Line` and `Underline` styles.
     pub width: f32,
     /// Fraction of line height.
     pub height_multiplier: f32,
     /// Seconds per blink cycle; 0 = no blink.
     pub blink_rate: f32,
-    pub smooth_animation: bool,
     pub animation_speed: f32,
     /// Seconds the caret stays solid after the cursor moves before
     /// resuming the blink animation. macOS uses ~0.5s, Windows ~0.53s,
     /// GNOME ~1.2s — set to match the host platform's convention.
     pub blink_pause_secs: f64,
+    pub surrounding_lines: u32,
+    pub surrounding_lines_style: SurroundingLinesStyle,
+    pub overtype_style: CursorStyle,
+    pub overtype_on_paste: bool,
     pub key_repeat: KeyRepeatSettings,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Reflect)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, Reflect)]
 #[reflect(Debug, PartialEq)]
 pub enum CursorStyle {
+    #[default]
     Line,
     Block,
     Underline,
+    LineThin,
+    BlockOutline,
+    UnderlineThin,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, Reflect)]
+#[reflect(Debug, PartialEq)]
+pub enum CursorBlinkingMode {
+    #[default]
+    Blink,
+    Smooth,
+    Phase,
+    Expand,
+    Solid,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, Reflect)]
+#[reflect(Debug, PartialEq)]
+pub enum SmoothCaretAnimation {
+    Off,
+    Explicit,
+    #[default]
+    On,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, Reflect)]
+#[reflect(Debug, PartialEq)]
+pub enum SurroundingLinesStyle {
+    #[default]
+    Default,
+    All,
 }
 
 impl Default for CursorSettings {
     fn default() -> Self {
         Self {
             style: CursorStyle::Line,
+            blinking: CursorBlinkingMode::Blink,
+            smooth_caret_animation: SmoothCaretAnimation::On,
             width: 2.0,
             height_multiplier: 1.0,
             blink_rate: 0.5,
-            smooth_animation: true,
             animation_speed: 10.0,
             blink_pause_secs: 0.5,
+            surrounding_lines: 0,
+            surrounding_lines_style: SurroundingLinesStyle::Default,
+            overtype_style: CursorStyle::Block,
+            overtype_on_paste: true,
             key_repeat: KeyRepeatSettings::default(),
         }
     }
@@ -129,17 +171,23 @@ pub fn caret_overlay(
 
 fn caret_width(settings: &CursorSettings) -> f32 {
     match settings.style {
-        CursorStyle::Line => settings.width,
-        CursorStyle::Block | CursorStyle::Underline => settings.width.max(1.0),
+        CursorStyle::Line | CursorStyle::LineThin => settings.width,
+        CursorStyle::Block
+        | CursorStyle::BlockOutline
+        | CursorStyle::Underline
+        | CursorStyle::UnderlineThin => settings.width.max(1.0),
     }
 }
 
 fn caret_vertical(settings: &CursorSettings) -> RowVertical {
     match settings.style {
-        CursorStyle::Line | CursorStyle::Block => RowVertical::Caret {
+        CursorStyle::Line
+        | CursorStyle::LineThin
+        | CursorStyle::Block
+        | CursorStyle::BlockOutline => RowVertical::Caret {
             height_fraction: settings.height_multiplier,
         },
-        CursorStyle::Underline => RowVertical::BottomBand {
+        CursorStyle::Underline | CursorStyle::UnderlineThin => RowVertical::BottomBand {
             thickness: settings.height_multiplier.max(1.0),
         },
     }

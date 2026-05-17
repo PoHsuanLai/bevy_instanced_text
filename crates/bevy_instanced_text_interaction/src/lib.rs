@@ -47,12 +47,15 @@ pub use clipboard::SystemClipboard;
 pub use clipboard::WasmClipboard;
 pub use clipboard::{ClipboardProvider, ClipboardResource, NullClipboard};
 pub use color::{TextCursorColor, TextSelectionColor};
-pub use cursor::{caret_overlay, cursor_blink_visible, BlinkPhase, CursorSettings, CursorStyle};
+pub use cursor::{
+    caret_overlay, cursor_blink_visible, BlinkPhase, CursorBlinkingMode, CursorSettings,
+    CursorStyle, SmoothCaretAnimation, SurroundingLinesStyle,
+};
 pub use focus::{
     copy_selection, on_focused_keyboard, on_pointer_drag, on_pointer_press, on_pointer_release,
     on_pointer_scroll, screen_to_char_pos, selection_text, InteractionSettings,
 };
-pub use interaction_states::{ScrollConfig, TextViewDragState};
+pub use interaction_states::{ScrollConfig, ScrollbarConfig, ScrollbarVisibility, TextViewDragState};
 pub use key_repeat::{KeyRepeatSettings, KeyRepeatState};
 pub use plugin::InstancedTextInteractionPlugin;
 pub use selection::{Selection, SelectionCollection, SelectionMode, DEFAULT_SEMANTIC_ESCAPE_CHARS};

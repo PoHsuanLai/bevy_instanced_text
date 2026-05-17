@@ -278,7 +278,10 @@ pub fn on_pointer_scroll<T: TextContent + Component>(
     let line_height = bevy_instanced_text::resolve_line_height(*lh, font.font_size);
 
     let (v_delta_per_dy, h_delta_per_dx) = match unit {
-        MouseScrollUnit::Line => (line_height * scroll_cfg.speed, mono.px * scroll_cfg.speed),
+        MouseScrollUnit::Line => (
+            line_height * scroll_cfg.mouse_wheel_scroll_sensitivity,
+            mono.px * scroll_cfg.mouse_wheel_scroll_sensitivity,
+        ),
         // Pixel-unit deltas are already in logical pixels; no speed multiplier.
         MouseScrollUnit::Pixel => (1.0, 1.0),
     };
