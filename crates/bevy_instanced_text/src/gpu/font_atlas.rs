@@ -336,12 +336,22 @@ impl Plugin for GlyphAtlasPlugin {
 fn setup_glyph_atlas(
     mut commands: Commands,
     mut images: ResMut<Assets<Image>>,
+    fonts: Res<Assets<Font>>,
     windows: Query<&bevy::window::Window, With<bevy::window::PrimaryWindow>>,
 ) {
     let mut atlas = GlyphAtlas::new(&mut images);
     if let Ok(window) = windows.single() {
         atlas.set_raster_scale(window.scale_factor());
     }
+    // Seed the atlas's private `FontSystem` with whichever font `bevy_text`
+    // registered at `Handle::default()` (its bundled `FiraMono-subset.ttf`
+    // when the `default_font` feature is on). cosmic-text's `ShapeLine::new`
+    // panics with `"no default font found"` if the system has zero faces —
+    // on native this never bites because `FontSystem::new()` scans the OS,
+    // but `wasm32-unknown-unknown` ships no fonts and the very first shape
+    // crashes before any consumer-supplied font asset finishes loading.
+    let default_handle: Handle<Font> = Handle::default();
+    atlas.ensure_font(&default_handle, &fonts);
     commands.insert_resource(atlas);
 }
 

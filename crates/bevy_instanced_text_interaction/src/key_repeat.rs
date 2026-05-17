@@ -6,8 +6,7 @@
 //! `Action` enum dispatched to typed editing/terminal events, and both
 //! want held-key auto-repeat without redoing the timing logic.
 
-use std::time::Instant;
-
+use bevy::platform::time::Instant;
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
