@@ -135,14 +135,10 @@ fn line_count_of(body: &str) -> usize {
     if body.is_empty() {
         return 1;
     }
-    let newlines = body.as_bytes().iter().filter(|&&b| b == b'\n').count();
-    // Each '\n' separates a line from the next; if the string ends with '\n'
-    // there is a virtual empty line after.
-    if body.ends_with('\n') {
-        newlines + 1
-    } else {
-        newlines + 1
-    }
+    // Each '\n' separates a line from the next. A trailing '\n' contributes
+    // its own virtual empty line, which is also (newlines + 1) — for both
+    // "a\nb" (1 nl → 2 lines) and "a\nb\n" (2 nls → 3 lines).
+    body.as_bytes().iter().filter(|&&b| b == b'\n').count() + 1
 }
 
 impl TextContent for bevy::text::TextSpan {

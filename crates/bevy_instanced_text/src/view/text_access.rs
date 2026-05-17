@@ -35,6 +35,7 @@ pub struct LayoutProduceSet;
 /// `start` is the first buffer line whose first display row is at or past
 /// the visible top, `end` is one past the last buffer line whose first
 /// display row is past the visible bottom.
+#[allow(clippy::too_many_arguments)]
 pub fn visible_buffer_range(
     buffer: &impl TextContent,
     scroll_y: f32,
@@ -584,10 +585,11 @@ mod tests {
     }
 
     fn test_computed() -> ComputedNode {
-        let mut c = ComputedNode::default();
-        c.size = bevy::math::Vec2::new(800.0, 600.0);
-        c.inverse_scale_factor = 1.0;
-        c
+        ComputedNode {
+            size: bevy::math::Vec2::new(800.0, 600.0),
+            inverse_scale_factor: 1.0,
+            ..ComputedNode::default()
+        }
     }
 
     fn build(text: &str) -> DisplayLayout {

@@ -235,6 +235,7 @@ fn resolve_display_row_and_x(
 }
 
 #[cfg(test)]
+#[allow(clippy::field_reassign_with_default)]
 mod tests {
     use super::*;
     use crate::view::font::MonoCellWidth;

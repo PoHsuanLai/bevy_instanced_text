@@ -289,6 +289,7 @@ impl RowMetrics {
 /// baseline ratio.
 #[derive(bevy::ecs::system::SystemParam)]
 pub struct RowMetricsParam<'w, 's> {
+    #[allow(clippy::type_complexity)]
     query: bevy::ecs::system::Query<
         'w,
         's,
@@ -358,6 +359,7 @@ impl<'w, 's> RowMetricsParam<'w, 's> {
 }
 
 #[cfg(test)]
+#[allow(clippy::field_reassign_with_default)]
 mod tests {
     use super::*;
     use crate::view::overlay::{CornerRadii, RectOverlay, RowVertical};

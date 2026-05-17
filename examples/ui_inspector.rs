@@ -1,3 +1,5 @@
+#![allow(clippy::type_complexity)]
+
 //! Property inspector — instanced text inside a real Bevy UI layout.
 //!
 //! A three-panel UI: a sidebar listing scene objects, a main properties panel

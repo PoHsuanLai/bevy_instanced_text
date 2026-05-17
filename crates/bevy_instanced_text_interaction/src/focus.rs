@@ -90,6 +90,7 @@ type CopyQuery<'w, 's, T> =
 /// `layout` is consulted when available so proportional fonts hit-test
 /// correctly via shaped per-glyph advances; falls back to `font.char_width`
 /// column math otherwise.
+#[allow(clippy::too_many_arguments)]
 pub fn screen_to_char_pos<T: TextContent>(
     screen_pos: Vec2,
     content: &T,

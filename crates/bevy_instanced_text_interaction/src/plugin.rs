@@ -70,10 +70,10 @@ impl<T: TextContent + Component> Plugin for InstancedTextInteractionPlugin<T> {
         }
 
         // The release observer is non-generic — only register it once.
-        if !app
+        if app
             .world()
             .get_resource::<ReleaseObserverRegistered>()
-            .is_some()
+            .is_none()
         {
             app.add_observer(on_pointer_release);
             app.insert_resource(ReleaseObserverRegistered);
