@@ -27,7 +27,7 @@ bevy = { version = "0.18", default-features = false, features = [
 ] }
 
 bevy_instanced_text = { path = "../crates/bevy_instanced_text" }
-bevy_instanced_text_interaction = { path = "../crates/bevy_instanced_text_interaction" }
+bevy_instanced_text_interaction = { path = "../crates/bevy_instanced_text_interaction", features = ["arboard"] }
 
 [[example]]
 name = "text_view"

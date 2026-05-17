@@ -10,10 +10,10 @@ keywords = ["bevy", "text", "selection", "clipboard", "picking"]
 categories = ["game-development"]
 
 [features]
-default = ["arboard"]
-# `arboard`-backed `SystemClipboard`. Disable for headless / web / sandboxed
-# builds and substitute your own provider via
-# `insert_resource(ClipboardResource::new(...))`.
+default = []
+# `arboard`-backed `SystemClipboard`. Pick this for native / desktop targets.
+# Disable for headless / web / sandboxed builds and substitute your own
+# provider via `insert_resource(ClipboardResource::new(...))`.
 arboard = ["dep:arboard"]
 # `web-sys`-backed `WasmClipboard`. Write is fire-and-forget via async
 # `navigator.clipboard.writeText`; read returns `None`.
