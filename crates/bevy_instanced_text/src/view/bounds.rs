@@ -312,7 +312,14 @@ impl<'w, 's> RowMetricsParam<'w, 's> {
         let baseline = layout
             .map(|l| l.baseline_offset)
             .unwrap_or(font.font_size * DEFAULT_BASELINE_OFFSET_RATIO);
-        Some(row_metrics_with_baseline(computed, scroll.y, scroll.x, line_height, mono, baseline))
+        Some(row_metrics_with_baseline(
+            computed,
+            scroll.y,
+            scroll.x,
+            line_height,
+            mono,
+            baseline,
+        ))
     }
 
     /// [`get`](Self::get) that panics on missing components.
@@ -337,7 +344,14 @@ impl<'w, 's> RowMetricsParam<'w, 's> {
                     .unwrap_or(font.font_size * DEFAULT_BASELINE_OFFSET_RATIO);
                 (
                     entity,
-                    row_metrics_with_baseline(computed, scroll.y, scroll.x, line_height, mono, baseline),
+                    row_metrics_with_baseline(
+                        computed,
+                        scroll.y,
+                        scroll.x,
+                        line_height,
+                        mono,
+                        baseline,
+                    ),
                 )
             })
     }
@@ -408,7 +422,11 @@ mod tests {
             let y_mid = y_top + metrics.line_height * 0.5;
             let y_just_below_top = y_top + 0.001;
             assert_eq!(metrics.pick_row(y_top), Some(row), "row {row} top boundary");
-            assert_eq!(metrics.pick_row(y_just_below_top), Some(row), "row {row} just inside");
+            assert_eq!(
+                metrics.pick_row(y_just_below_top),
+                Some(row),
+                "row {row} just inside"
+            );
             assert_eq!(metrics.pick_row(y_mid), Some(row), "row {row} midpoint");
         }
     }
@@ -430,8 +448,8 @@ mod tests {
     /// two would surface as off-by-one rows under clicks.
     #[test]
     fn pick_row_from_hit_matches_pick_row() {
-        use bevy::picking::backend::HitData;
         use bevy::math::Vec3;
+        use bevy::picking::backend::HitData;
         use bevy::prelude::Entity;
         let metrics = make_metrics();
         // viewport_height = 600 (from make_metrics).
@@ -461,7 +479,10 @@ mod tests {
             let pos = metrics.cell_top_left(0, col);
             // pos.x is in node-local space; pick_column should recover col.
             assert_eq!(metrics.pick_column(pos.x + 0.001), Some(col));
-            assert_eq!(metrics.pick_column(pos.x + metrics.char_width * 0.5), Some(col));
+            assert_eq!(
+                metrics.pick_column(pos.x + metrics.char_width * 0.5),
+                Some(col)
+            );
         }
     }
 
@@ -531,10 +552,24 @@ mod tests {
         let mut layout = DisplayLayout::default();
         layout.baseline_offset = 14.0 * 0.32;
 
-        let direct = row_metrics_with_baseline(&computed, scroll.y, scroll.x, 21.0, &mono, layout.baseline_offset);
+        let direct = row_metrics_with_baseline(
+            &computed,
+            scroll.y,
+            scroll.x,
+            21.0,
+            &mono,
+            layout.baseline_offset,
+        );
 
         let entity = world
-            .spawn((computed, scroll, font.clone(), line_height_comp, mono, layout.clone()))
+            .spawn((
+                computed,
+                scroll,
+                font.clone(),
+                line_height_comp,
+                mono,
+                layout.clone(),
+            ))
             .id();
 
         let result = world

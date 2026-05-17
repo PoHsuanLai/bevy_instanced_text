@@ -30,47 +30,45 @@
 //! [`on_pointer_scroll`], [`on_focused_keyboard`] are generic over the
 //! content type and registered by [`InstancedTextInteractionPlugin<T>`].
 
-pub mod text_edit;
 pub mod clipboard;
-pub mod interaction_states;
+pub mod color;
 pub mod cursor;
 pub mod focus;
+pub mod interaction_states;
 pub mod key_repeat;
 pub mod plugin;
 pub mod selection;
+pub mod text_edit;
 pub mod text_state;
-pub mod color;
 
-pub use text_edit::{Anchor, AnchorBias, AnchorSet, TextEdit};
 #[cfg(feature = "arboard")]
 pub use clipboard::SystemClipboard;
 #[cfg(feature = "clipboard-wasm")]
 pub use clipboard::WasmClipboard;
 pub use clipboard::{ClipboardProvider, ClipboardResource, NullClipboard};
-pub use interaction_states::{ScrollConfig, TextViewDragState};
+pub use color::{TextCursorColor, TextSelectionColor};
 pub use cursor::{caret_overlay, cursor_blink_visible, BlinkPhase, CursorSettings, CursorStyle};
 pub use focus::{
     copy_selection, on_focused_keyboard, on_pointer_drag, on_pointer_press, on_pointer_release,
     on_pointer_scroll, screen_to_char_pos, selection_text, InteractionSettings,
 };
+pub use interaction_states::{ScrollConfig, TextViewDragState};
 pub use key_repeat::{KeyRepeatSettings, KeyRepeatState};
 pub use plugin::InstancedTextInteractionPlugin;
-pub use selection::{
-    Selection, SelectionCollection, SelectionMode, DEFAULT_SEMANTIC_ESCAPE_CHARS,
-};
+pub use selection::{Selection, SelectionCollection, SelectionMode, DEFAULT_SEMANTIC_ESCAPE_CHARS};
+pub use text_edit::{Anchor, AnchorBias, AnchorSet, TextEdit};
 pub use text_state::{CursorState, SelectionState};
-pub use color::{TextCursorColor, TextSelectionColor};
 
 pub mod prelude {
     //! Common types for spawning interactive text views.
+    #[cfg(feature = "arboard")]
+    pub use crate::SystemClipboard;
     pub use crate::{
-        caret_overlay, cursor_blink_visible, copy_selection, screen_to_char_pos, selection_text,
+        caret_overlay, copy_selection, cursor_blink_visible, screen_to_char_pos, selection_text,
         Anchor, AnchorBias, AnchorSet, BlinkPhase, ClipboardProvider, ClipboardResource,
         CursorSettings, CursorState, CursorStyle, InstancedTextInteractionPlugin,
         InteractionSettings, KeyRepeatSettings, KeyRepeatState, NullClipboard, ScrollConfig,
-        Selection, SelectionCollection, SelectionMode, SelectionState, TextCursorColor,
-        TextEdit, TextSelectionColor, TextViewDragState, DEFAULT_SEMANTIC_ESCAPE_CHARS,
+        Selection, SelectionCollection, SelectionMode, SelectionState, TextCursorColor, TextEdit,
+        TextSelectionColor, TextViewDragState, DEFAULT_SEMANTIC_ESCAPE_CHARS,
     };
-    #[cfg(feature = "arboard")]
-    pub use crate::SystemClipboard;
 }

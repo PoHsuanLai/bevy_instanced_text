@@ -198,10 +198,8 @@ fn setup_text_view(
     commands.spawn((
         TextBuffer::<TextSpan>::new(full_text.clone()),
         line_styles,
-        TextFont::from_font_size(16.0)
-            .with_font(asset_server.load("fonts/FiraMono-Regular.ttf")),
-        MonoFontFaces::default()
-            .with_bold(asset_server.load("fonts/FiraMono-Medium.ttf")),
+        TextFont::from_font_size(16.0).with_font(asset_server.load("fonts/FiraMono-Regular.ttf")),
+        MonoFontFaces::default().with_bold(asset_server.load("fonts/FiraMono-Medium.ttf")),
         // Val::Px so Bevy UI layout resolves size without needing a UI camera.
         Node {
             width: Val::Px(window.width()),
@@ -213,10 +211,7 @@ fn setup_text_view(
 }
 
 fn styled_line(text: &str, color: Color) -> (String, Vec<TextFormat>) {
-    (
-        text.to_string(),
-        vec![TextFormat::fg(0..text.len(), color)],
-    )
+    (text.to_string(), vec![TextFormat::fg(0..text.len(), color)])
 }
 
 fn plain_line(text: &str) -> (String, Vec<TextFormat>) {

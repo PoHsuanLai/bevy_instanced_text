@@ -12,12 +12,12 @@ use bevy::prelude::*;
 use std::sync::Arc;
 
 use super::font::MonoCellWidth;
-use super::pipeline::DisplayLayout;
 use super::glyph::{LineShape, ShapedGlyph, ShapedLine, TextFormat};
+use super::pipeline::DisplayLayout;
 use super::text::{ContentMetrics, TextBuffer, TextContent};
-use super::text_style::{HiddenLines, LineStyles, FormattedSpan, TextBounds};
-use bevy::ui::{ComputedNode, ScrollPosition};
+use super::text_style::{FormattedSpan, HiddenLines, LineStyles, TextBounds};
 use crate::gpu::GlyphAtlas;
+use bevy::ui::{ComputedNode, ScrollPosition};
 
 /// Default extra rows kept above and below the visible window.
 pub const VIEWPORT_BUFFER_LINES: u32 = 4;
@@ -26,7 +26,6 @@ pub const VIEWPORT_BUFFER_LINES: u32 = 4;
 /// write `LineStyles` / `HiddenLines` should run `.before(LayoutProduceSet)`.
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LayoutProduceSet;
-
 
 /// The buffer-line range a layout pass will touch. Shared between the
 /// engine's `produce_layouts` and editor-side producer systems (e.g. the
@@ -699,7 +698,9 @@ mod tests {
 
         let entity = world
             .spawn((
-                TextBuffer::<crate::view::text::TextSpan>::new("hello world\nsecond line\nthird line\n"),
+                TextBuffer::<crate::view::text::TextSpan>::new(
+                    "hello world\nsecond line\nthird line\n",
+                ),
                 bevy::ui::ScrollPosition::default(),
                 ContentMetrics::default(),
                 test_computed(),
@@ -724,9 +725,7 @@ mod tests {
             let mut buf = world
                 .get_mut::<TextBuffer<crate::view::text::TextSpan>>(entity)
                 .unwrap();
-            buf.0 = crate::view::text::TextSpan::new(
-                "hello\n world\nsecond line\nthird line\n",
-            );
+            buf.0 = crate::view::text::TextSpan::new("hello\n world\nsecond line\nthird line\n");
         }
 
         world
@@ -739,8 +738,16 @@ mod tests {
             "post-edit layout: 5 rows (split added one)"
         );
         let texts: Vec<&str> = layout2.lines.iter().map(|l| l.text.as_str()).collect();
-        assert!(texts[0].starts_with("hello"), "row 0 = 'hello', got {:?}", texts[0]);
-        assert!(texts[1].starts_with(" world"), "row 1 = ' world', got {:?}", texts[1]);
+        assert!(
+            texts[0].starts_with("hello"),
+            "row 0 = 'hello', got {:?}",
+            texts[0]
+        );
+        assert!(
+            texts[1].starts_with(" world"),
+            "row 1 = ' world', got {:?}",
+            texts[1]
+        );
     }
 
     /// `buffer_row` on each `ShapedLine` must reflect the post-edit buffer.
@@ -770,4 +777,3 @@ mod tests {
         assert!(after_texts[2].starts_with('d'), "row 2 should be 'd' now");
     }
 }
-

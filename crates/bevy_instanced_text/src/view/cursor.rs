@@ -42,8 +42,8 @@ use super::bounds::{row_metrics_with_baseline, RowMetrics, DEFAULT_BASELINE_OFFS
 use super::font::MonoCellWidth;
 use super::pipeline::DisplayLayout;
 use super::text::{TextBuffer, TextContent};
-use bevy::text::TextFont;
 use bevy::ecs::component::Component;
+use bevy::text::TextFont;
 
 /// Resolved coordinates for a buffer position, in node-local logical
 /// pixels (top-left origin, +Y down) — the same space `Node::top` /
@@ -110,7 +110,15 @@ impl<'w, 's, T: TextContent + Component> BufferAnchorParam<'w, 's, T> {
     pub fn at_buffer_pos(&self, entity: Entity, line: u32, character: u32) -> Option<AnchorPoint> {
         let (_, computed, scroll, font, lh, mono, _buffer, layout) = self.query.get(entity).ok()?;
         let line_height = crate::view::font::resolve_line_height(*lh, font.font_size);
-        let metrics = build_metrics(computed, scroll.y, scroll.x, font, line_height, mono, layout);
+        let metrics = build_metrics(
+            computed,
+            scroll.y,
+            scroll.x,
+            font,
+            line_height,
+            mono,
+            layout,
+        );
 
         let (display_row, pixel_x) =
             resolve_display_row_and_x(line, character as usize, mono, layout);
@@ -124,7 +132,15 @@ impl<'w, 's, T: TextContent + Component> BufferAnchorParam<'w, 's, T> {
     pub fn at_char_index(&self, entity: Entity, char_index: usize) -> Option<AnchorPoint> {
         let (_, computed, scroll, font, lh, mono, buffer, layout) = self.query.get(entity).ok()?;
         let line_height = crate::view::font::resolve_line_height(*lh, font.font_size);
-        let metrics = build_metrics(computed, scroll.y, scroll.x, font, line_height, mono, layout);
+        let metrics = build_metrics(
+            computed,
+            scroll.y,
+            scroll.x,
+            font,
+            line_height,
+            mono,
+            layout,
+        );
 
         let char_index = char_index.min(buffer.char_count());
         let line_index = buffer.char_to_line(char_index);
@@ -188,7 +204,14 @@ fn build_metrics(
     let baseline = layout
         .map(|l| l.baseline_offset)
         .unwrap_or(font.font_size * DEFAULT_BASELINE_OFFSET_RATIO);
-    row_metrics_with_baseline(computed, scroll_y, horizontal_scroll, line_height, mono, baseline)
+    row_metrics_with_baseline(
+        computed,
+        scroll_y,
+        horizontal_scroll,
+        line_height,
+        mono,
+        baseline,
+    )
 }
 
 fn resolve_display_row_and_x(
@@ -235,12 +258,15 @@ mod tests {
         let font = bevy::text::TextFont::from_font_size(14.0);
         let line_height = bevy::text::LineHeight::Px(21.0);
         let mono = MonoCellWidth { px: 8.4 };
-        let buffer = TextBuffer::<super::super::text::TextSpan>::new("hello world\nsecond line\nthird");
+        let buffer =
+            TextBuffer::<super::super::text::TextSpan>::new("hello world\nsecond line\nthird");
         let mut layout = DisplayLayout::default();
         layout.baseline_offset = 14.0 * 0.32;
 
         let mut world = World::new();
-        let entity = world.spawn((computed, scroll, font, line_height, mono, buffer, layout)).id();
+        let entity = world
+            .spawn((computed, scroll, font, line_height, mono, buffer, layout))
+            .id();
         (world, entity)
     }
 
@@ -253,12 +279,14 @@ mod tests {
     fn buffer_pos_and_char_index_agree() {
         let (mut world, entity) = make_editor_world();
         let (a, b) = world
-            .run_system_once(move |anchors: BufferAnchorParam<super::super::text::TextSpan>| {
-                let a = anchors.at_buffer_pos(entity, 1, 3).unwrap();
-                // "hello world\n" = 12 chars, "sec" = 3 → char_index 15.
-                let b = anchors.at_char_index(entity, 15).unwrap();
-                (a, b)
-            })
+            .run_system_once(
+                move |anchors: BufferAnchorParam<super::super::text::TextSpan>| {
+                    let a = anchors.at_buffer_pos(entity, 1, 3).unwrap();
+                    // "hello world\n" = 12 chars, "sec" = 3 → char_index 15.
+                    let b = anchors.at_char_index(entity, 15).unwrap();
+                    (a, b)
+                },
+            )
             .unwrap();
         assert_eq!(a.display_row, b.display_row);
         assert!((a.pixel_x - b.pixel_x).abs() < 1e-3);
@@ -280,12 +308,16 @@ mod tests {
         let buffer = TextBuffer::<super::super::text::TextSpan>::new("plain text");
 
         let mut world = World::new();
-        let entity = world.spawn((computed, scroll, font, line_height, mono, buffer)).id();
+        let entity = world
+            .spawn((computed, scroll, font, line_height, mono, buffer))
+            .id();
 
         let anchor = world
-            .run_system_once(move |anchors: BufferAnchorParam<super::super::text::TextSpan>| {
-                anchors.at_buffer_pos(entity, 0, 5).unwrap()
-            })
+            .run_system_once(
+                move |anchors: BufferAnchorParam<super::super::text::TextSpan>| {
+                    anchors.at_buffer_pos(entity, 0, 5).unwrap()
+                },
+            )
             .unwrap();
         // No layout → 1:1 buffer-row, monospace columns.
         assert_eq!(anchor.display_row, 0);
@@ -299,16 +331,19 @@ mod tests {
     fn top_left_matches_legacy_cursor_screen_pos() {
         let (mut world, entity) = make_editor_world();
         let anchor = world
-            .run_system_once(move |anchors: BufferAnchorParam<super::super::text::TextSpan>| {
-                anchors.at_buffer_pos(entity, 1, 3).unwrap()
-            })
+            .run_system_once(
+                move |anchors: BufferAnchorParam<super::super::text::TextSpan>| {
+                    anchors.at_buffer_pos(entity, 1, 3).unwrap()
+                },
+            )
             .unwrap();
 
         // Legacy formula from examples/editor_lsp.rs::cursor_screen_pos
         // — now lives entirely in `RowMetrics::cell_top_left_at_x`.
         let computed = make_computed();
         let mono = MonoCellWidth { px: 8.4 };
-        let metrics = super::row_metrics_with_baseline(&computed, 100.0, 0.0, 21.0, &mono, 14.0 * 0.32);
+        let metrics =
+            super::row_metrics_with_baseline(&computed, 100.0, 0.0, 21.0, &mono, 14.0 * 0.32);
         let expected = metrics.cell_top_left_at_x(1, 3.0 * mono.px);
 
         assert!((anchor.top_left.x - expected.x).abs() < 1e-3);
@@ -322,14 +357,17 @@ mod tests {
     fn top_left_matches_row_metrics() {
         let (mut world, entity) = make_editor_world();
         let anchor = world
-            .run_system_once(move |anchors: BufferAnchorParam<super::super::text::TextSpan>| {
-                anchors.at_buffer_pos(entity, 2, 4).unwrap()
-            })
+            .run_system_once(
+                move |anchors: BufferAnchorParam<super::super::text::TextSpan>| {
+                    anchors.at_buffer_pos(entity, 2, 4).unwrap()
+                },
+            )
             .unwrap();
 
         let computed = make_computed();
         let mono = MonoCellWidth { px: 8.4 };
-        let metrics = super::row_metrics_with_baseline(&computed, 100.0, 0.0, 21.0, &mono, 14.0 * 0.32);
+        let metrics =
+            super::row_metrics_with_baseline(&computed, 100.0, 0.0, 21.0, &mono, 14.0 * 0.32);
         let expected = metrics.cell_top_left_at_x(2, 4.0 * mono.px);
 
         assert!((anchor.top_left - expected).length() < 1e-3);

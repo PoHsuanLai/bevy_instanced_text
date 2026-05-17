@@ -214,4 +214,3 @@ pub struct ShapedLine {
     /// chat/log demos that don't want to pay shaping cost).
     pub shape: Option<Arc<LineShape>>,
 }
-

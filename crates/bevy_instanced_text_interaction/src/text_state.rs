@@ -65,7 +65,12 @@ impl SelectionState {
     }
 
     /// Add a new cursor with a selection range (both endpoints clamped).
-    pub fn add_cursor_with_range<T: TextContent>(&mut self, content: &T, head: usize, anchor: usize) {
+    pub fn add_cursor_with_range<T: TextContent>(
+        &mut self,
+        content: &T,
+        head: usize,
+        anchor: usize,
+    ) {
         let max = content.char_count();
         let head = head.min(max);
         let anchor = anchor.min(max);

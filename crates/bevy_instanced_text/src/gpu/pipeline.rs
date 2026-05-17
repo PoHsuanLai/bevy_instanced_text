@@ -26,11 +26,10 @@ use bevy::{
             binding_types::{sampler, texture_2d, uniform_buffer},
             BindGroup, BindGroupEntries, BindGroupLayoutDescriptor, BindGroupLayoutEntries,
             BlendState, Buffer, BufferInitDescriptor, BufferUsages, ColorTargetState, ColorWrites,
-            FragmentState, MultisampleState, PipelineCache, PrimitiveState, PrimitiveTopology,
-            RenderPipelineDescriptor, SamplerBindingType, ShaderStages, ShaderType,
-            SpecializedRenderPipeline, SpecializedRenderPipelines, TextureFormat,
+            DynamicUniformBuffer, FragmentState, MultisampleState, PipelineCache, PrimitiveState,
+            PrimitiveTopology, RenderPipelineDescriptor, SamplerBindingType, ShaderStages,
+            ShaderType, SpecializedRenderPipeline, SpecializedRenderPipelines, TextureFormat,
             TextureSampleType, VertexAttribute, VertexFormat, VertexState, VertexStepMode,
-            DynamicUniformBuffer,
         },
         renderer::{RenderDevice, RenderQueue},
         sync_world::{MainEntity, RenderEntity},
@@ -182,8 +181,16 @@ fn prepare_batch_transform_uniforms(
             None => (Vec2::ZERO, Vec2::new(-1.0, -1.0)),
         };
         let uniform = BatchUniform {
-            affine_row0: Vec3::new(transform.affine[0], transform.affine[1], transform.affine[2]),
-            affine_row1: Vec3::new(transform.affine[3], transform.affine[4], transform.affine[5]),
+            affine_row0: Vec3::new(
+                transform.affine[0],
+                transform.affine[1],
+                transform.affine[2],
+            ),
+            affine_row1: Vec3::new(
+                transform.affine[3],
+                transform.affine[4],
+                transform.affine[5],
+            ),
             clip_min,
             clip_max,
         };
@@ -311,14 +318,46 @@ impl SpecializedRenderPipeline for InstancedTextPipeline {
             array_stride: std::mem::size_of::<GlyphInstance>() as u64,
             step_mode: VertexStepMode::Instance,
             attributes: vec![
-                VertexAttribute { format: VertexFormat::Float32x2, offset: 0,  shader_location: 0 },
-                VertexAttribute { format: VertexFormat::Float32x2, offset: 8,  shader_location: 1 },
-                VertexAttribute { format: VertexFormat::Float32x2, offset: 16, shader_location: 2 },
-                VertexAttribute { format: VertexFormat::Float32x2, offset: 24, shader_location: 3 },
-                VertexAttribute { format: VertexFormat::Float32x4, offset: 32, shader_location: 4 },
-                VertexAttribute { format: VertexFormat::Float32x4, offset: 48, shader_location: 5 },
-                VertexAttribute { format: VertexFormat::Float32,    offset: 64, shader_location: 6 },
-                VertexAttribute { format: VertexFormat::Float32,    offset: 68, shader_location: 7 },
+                VertexAttribute {
+                    format: VertexFormat::Float32x2,
+                    offset: 0,
+                    shader_location: 0,
+                },
+                VertexAttribute {
+                    format: VertexFormat::Float32x2,
+                    offset: 8,
+                    shader_location: 1,
+                },
+                VertexAttribute {
+                    format: VertexFormat::Float32x2,
+                    offset: 16,
+                    shader_location: 2,
+                },
+                VertexAttribute {
+                    format: VertexFormat::Float32x2,
+                    offset: 24,
+                    shader_location: 3,
+                },
+                VertexAttribute {
+                    format: VertexFormat::Float32x4,
+                    offset: 32,
+                    shader_location: 4,
+                },
+                VertexAttribute {
+                    format: VertexFormat::Float32x4,
+                    offset: 48,
+                    shader_location: 5,
+                },
+                VertexAttribute {
+                    format: VertexFormat::Float32,
+                    offset: 64,
+                    shader_location: 6,
+                },
+                VertexAttribute {
+                    format: VertexFormat::Float32,
+                    offset: 68,
+                    shader_location: 7,
+                },
             ],
         };
 
@@ -393,16 +432,11 @@ fn queue_instanced_text(
     let ui_view_keys: Vec<bevy::render::view::RetainedViewEntity> =
         transparent_render_phases.keys().copied().collect();
 
-    let mut by_main_camera: EntityHashMap<(
-        bevy::render::view::RetainedViewEntity,
-        bool,
-    )> = EntityHashMap::default();
+    let mut by_main_camera: EntityHashMap<(bevy::render::view::RetainedViewEntity, bool)> =
+        EntityHashMap::default();
     for (main_render_entity, ui_camera_view) in &main_views {
         if let Ok(view) = ui_views.get(ui_camera_view.0) {
-            by_main_camera.insert(
-                main_render_entity,
-                (view.retained_view_entity, view.hdr),
-            );
+            by_main_camera.insert(main_render_entity, (view.retained_view_entity, view.hdr));
         }
     }
 
@@ -411,15 +445,16 @@ fn queue_instanced_text(
     // view that has a `TransparentUi` phase. Single-camera apps (the common
     // case) route to the only available view; multi-camera apps overshoot
     // for a frame or two, then converge.
-    let fallback_views: Vec<(bevy::render::view::RetainedViewEntity, bool)> = if by_main_camera.is_empty() {
-        ui_views
-            .iter()
-            .map(|view| (view.retained_view_entity, view.hdr))
-            .filter(|(rve, _)| ui_view_keys.contains(rve))
-            .collect()
-    } else {
-        Vec::new()
-    };
+    let fallback_views: Vec<(bevy::render::view::RetainedViewEntity, bool)> =
+        if by_main_camera.is_empty() {
+            ui_views
+                .iter()
+                .map(|view| (view.retained_view_entity, view.hdr))
+                .filter(|(rve, _)| ui_view_keys.contains(rve))
+                .collect()
+        } else {
+            Vec::new()
+        };
 
     for (entity, main_entity, batch, transform, resolved_cam) in &batches {
         if batch.instances.is_empty() {
@@ -441,7 +476,10 @@ fn queue_instanced_text(
             let pipeline_id = pipelines.specialize(
                 &pipeline_cache,
                 &instanced_text_pipeline,
-                InstancedTextPipelineKey { hdr, msaa_samples: 1 },
+                InstancedTextPipelineKey {
+                    hdr,
+                    msaa_samples: 1,
+                },
             );
 
             let sort = transform.stack_index as f32 + stack_z_offsets::TEXT;

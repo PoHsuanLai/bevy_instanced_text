@@ -230,7 +230,7 @@ mod tests {
     #[test]
     fn scroll_to_bottom_pins_last_row() {
         let layout = layout_with(20, 20.0); // 400 px content
-        // Viewport 100 px — bottom 100 px shows last 5 rows, so scroll target = 300.
+                                            // Viewport 100 px — bottom 100 px shows last 5 rows, so scroll target = 300.
         assert!((layout.scroll_to_bottom_target(100.0) - 300.0).abs() < 1e-4);
     }
 }

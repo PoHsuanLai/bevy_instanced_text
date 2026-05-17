@@ -12,20 +12,23 @@
 use std::marker::PhantomData;
 
 use bevy::app::{PluginGroup, PluginGroupBuilder};
-use bevy::prelude::*;
 use bevy::math::Affine2;
-use bevy::ui::{ui_transform::UiGlobalTransform, CalculatedClip, ComputedNode, ComputedUiTargetCamera, IsDefaultUiCamera, ScrollPosition, UiSystems};
+use bevy::prelude::*;
+use bevy::ui::{
+    ui_transform::UiGlobalTransform, CalculatedClip, ComputedNode, ComputedUiTargetCamera,
+    IsDefaultUiCamera, ScrollPosition, UiSystems,
+};
 
 use super::font::{MonoCellWidth, MonoFontFaces};
-use super::pipeline::DisplayLayout;
-use super::text_access::{produce_layouts, LayoutProduceSet};
+use super::measurement::LayoutTuning;
 use super::overlay::{TextOverlays, TextUnderlays};
+use super::pipeline::DisplayLayout;
 use super::render::{render_layout, BatchTransform, GlyphBatchComponent, TextViewBatch};
 use super::text::{ContentMetrics, TextBuffer, TextContent};
+use super::text_access::{produce_layouts, LayoutProduceSet};
 use super::text_style::TextBounds;
-pub use bevy::text::{TextBackgroundColor, TextColor};
-use super::measurement::LayoutTuning;
 use crate::gpu::{atlas_ready, GlyphAtlas, GlyphAtlasPlugin, InstancedTextRenderPlugin};
+pub use bevy::text::{TextBackgroundColor, TextColor};
 
 /// Contains `update_text_views`. Order downstream `.after(TextViewRenderSet)`.
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
@@ -192,8 +195,22 @@ pub fn update_text_views(
     fonts: Res<Assets<bevy::text::Font>>,
 ) {
     let _span = bevy::prelude::info_span!("update_text_views").entered();
-    for (tv_entity, scroll, computed, ui_transform, clip, target_cam, font, faces_cfg, text_layout, layout, underlays, overlays, batch_entity_opt, render_layers) in
-        text_views.iter_mut()
+    for (
+        tv_entity,
+        scroll,
+        computed,
+        ui_transform,
+        clip,
+        target_cam,
+        font,
+        faces_cfg,
+        text_layout,
+        layout,
+        underlays,
+        overlays,
+        batch_entity_opt,
+        render_layers,
+    ) in text_views.iter_mut()
     {
         let justify = text_layout.map(|t| t.justify).unwrap_or_default();
         let regular = atlas.ensure_font(&font.font, &fonts);
@@ -217,7 +234,11 @@ pub fn update_text_views(
             synthesis: faces_cfg.font_synthesis,
         };
         // Skip the rebuild if nothing changed — the GPU batch is still valid.
-        if !layout.is_changed() && !underlays.is_changed() && !overlays.is_changed() && batch_entity_opt.is_some() {
+        if !layout.is_changed()
+            && !underlays.is_changed()
+            && !overlays.is_changed()
+            && batch_entity_opt.is_some()
+        {
             continue;
         }
         let layout: &DisplayLayout = &layout;
@@ -238,8 +259,12 @@ pub fn update_text_views(
             * Affine2::from_scale(Vec2::splat(scale));
         let batch_transform = BatchTransform {
             affine: [
-                composed.matrix2.x_axis.x, composed.matrix2.y_axis.x, composed.translation.x,
-                composed.matrix2.x_axis.y, composed.matrix2.y_axis.y, composed.translation.y,
+                composed.matrix2.x_axis.x,
+                composed.matrix2.y_axis.x,
+                composed.translation.x,
+                composed.matrix2.x_axis.y,
+                composed.matrix2.y_axis.y,
+                composed.translation.y,
             ],
             clip: clip.map(|c| c.clip),
             stack_index: computed.stack_index,
@@ -331,7 +356,6 @@ pub fn update_text_views(
         }
     }
 }
-
 
 /// Mark one camera as the default UI camera if none is marked yet.
 /// This lets Bevy UI resolve `Val::Percent` sizes for `TextView` `Node` entities

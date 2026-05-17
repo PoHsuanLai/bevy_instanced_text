@@ -24,16 +24,14 @@ use bevy_instanced_text_interaction::InstancedTextInteractionPlugin;
 
 fn main() {
     App::new()
-        .add_plugins(
-            DefaultPlugins.set(WindowPlugin {
-                primary_window: Some(Window {
-                    title: "Property Inspector — instanced text dogfood".into(),
-                    resolution: (1024_u32, 768_u32).into(),
-                    ..default()
-                }),
+        .add_plugins(DefaultPlugins.set(WindowPlugin {
+            primary_window: Some(Window {
+                title: "Property Inspector — instanced text dogfood".into(),
+                resolution: (1024_u32, 768_u32).into(),
                 ..default()
             }),
-        )
+            ..default()
+        }))
         .add_plugins(InstancedTextPlugins)
         // Routes Pointer<Scroll> to the hovered TextBuffer<TextSpan> entity,
         // so per-panel mouse-wheel scrolling works without any custom system.
@@ -41,10 +39,7 @@ fn main() {
         .init_resource::<InspectorState>()
         .add_systems(Startup, setup_camera)
         .add_systems(Startup, setup_ui.after(setup_camera))
-        .add_systems(
-            Update,
-            (rebuild_properties_on_selection, tick_log_panel),
-        )
+        .add_systems(Update, (rebuild_properties_on_selection, tick_log_panel))
         .run();
 }
 
@@ -62,52 +57,52 @@ const OBJECTS: &[SceneObject] = &[
     SceneObject {
         name: "Camera",
         props: &[
-            ("position",   "Vec3(0.0, 5.0, -10.0)"),
-            ("rotation",   "Quat(0.0, 0.0, 0.0, 1.0)"),
-            ("fov",        "60°"),
-            ("near",       "0.1"),
-            ("far",        "1000.0"),
+            ("position", "Vec3(0.0, 5.0, -10.0)"),
+            ("rotation", "Quat(0.0, 0.0, 0.0, 1.0)"),
+            ("fov", "60°"),
+            ("near", "0.1"),
+            ("far", "1000.0"),
             ("projection", "Perspective"),
         ],
     },
     SceneObject {
         name: "DirectionalLight",
         props: &[
-            ("direction",   "Vec3(-0.5, -1.0, -0.3)"),
-            ("color",       "Color::WHITE"),
+            ("direction", "Vec3(-0.5, -1.0, -0.3)"),
+            ("color", "Color::WHITE"),
             ("illuminance", "10000.0 lux"),
-            ("shadows",     "true"),
+            ("shadows", "true"),
             ("cascade_count", "4"),
         ],
     },
     SceneObject {
         name: "Terrain",
         props: &[
-            ("mesh",       "terrain_512x512.obj"),
-            ("material",   "grass_pbr"),
-            ("position",   "Vec3(0.0, 0.0, 0.0)"),
-            ("scale",      "Vec3(1.0, 1.0, 1.0)"),
-            ("collider",   "Heightmap"),
+            ("mesh", "terrain_512x512.obj"),
+            ("material", "grass_pbr"),
+            ("position", "Vec3(0.0, 0.0, 0.0)"),
+            ("scale", "Vec3(1.0, 1.0, 1.0)"),
+            ("collider", "Heightmap"),
             ("lod_levels", "3"),
         ],
     },
     SceneObject {
         name: "PlayerSpawn",
         props: &[
-            ("position",  "Vec3(12.5, 0.0, -3.0)"),
-            ("rotation",  "Quat(0.0, 0.785, 0.0, 0.924)"),
-            ("team",      "1"),
-            ("active",    "true"),
+            ("position", "Vec3(12.5, 0.0, -3.0)"),
+            ("rotation", "Quat(0.0, 0.785, 0.0, 0.924)"),
+            ("team", "1"),
+            ("active", "true"),
         ],
     },
     SceneObject {
         name: "AmbientOcclusion",
         props: &[
-            ("technique",  "SSAO"),
-            ("radius",     "0.5"),
-            ("samples",    "8"),
-            ("intensity",  "0.8"),
-            ("bias",       "0.025"),
+            ("technique", "SSAO"),
+            ("radius", "0.5"),
+            ("samples", "8"),
+            ("intensity", "0.8"),
+            ("bias", "0.025"),
         ],
     },
 ];
@@ -145,10 +140,16 @@ fn setup_camera(mut commands: Commands) {
     commands.spawn(Camera2d);
 }
 
-fn setup_ui(mut commands: Commands, asset_server: Res<AssetServer>, mut state: ResMut<InspectorState>) {
+fn setup_ui(
+    mut commands: Commands,
+    asset_server: Res<AssetServer>,
+    mut state: ResMut<InspectorState>,
+) {
     // Seed the log with a couple of entries so the panel isn't empty.
     state.log_lines.push("[00:00:00] Inspector started".into());
-    state.log_lines.push("[00:00:00] Scene loaded: 5 objects".into());
+    state
+        .log_lines
+        .push("[00:00:00] Scene loaded: 5 objects".into());
 
     let font = asset_server.load("fonts/FiraMono-Regular.ttf");
     let font_size = 13.0;
@@ -192,23 +193,24 @@ fn setup_ui(mut commands: Commands, asset_server: Res<AssetServer>, mut state: R
                 let sidebar_styles = build_sidebar_styles(&sidebar_text, 0);
                 let sidebar_underlays = build_sidebar_underlays(0);
 
-                sidebar.spawn((
-                    TextBuffer::<TextSpan>::new(sidebar_text),
-                    sidebar_styles,
-                    sidebar_underlays,
-                    TextFont::from_font_size(font_size).with_font(font.clone()),
-                    TextColor(Color::srgb(0.82, 0.82, 0.82)),
-                    TextBackgroundColor(Color::srgb(0.13, 0.13, 0.13)),
-                    Node {
-                        width: Val::Percent(100.0),
-                        flex_grow: 1.0,
-                        padding: UiRect::all(Val::Px(6.0)),
-                        overflow: Overflow::clip(),
-                        ..default()
-                    },
-                    SidebarPanel,
-                ))
-                .observe(on_sidebar_click);
+                sidebar
+                    .spawn((
+                        TextBuffer::<TextSpan>::new(sidebar_text),
+                        sidebar_styles,
+                        sidebar_underlays,
+                        TextFont::from_font_size(font_size).with_font(font.clone()),
+                        TextColor(Color::srgb(0.82, 0.82, 0.82)),
+                        TextBackgroundColor(Color::srgb(0.13, 0.13, 0.13)),
+                        Node {
+                            width: Val::Percent(100.0),
+                            flex_grow: 1.0,
+                            padding: UiRect::all(Val::Px(6.0)),
+                            overflow: Overflow::clip(),
+                            ..default()
+                        },
+                        SidebarPanel,
+                    ))
+                    .observe(on_sidebar_click);
             });
 
             // ----------------------------------------------------------------
@@ -269,7 +271,9 @@ fn setup_ui(mut commands: Commands, asset_server: Res<AssetServer>, mut state: R
 
                 // Log text view
                 right.spawn((
-                    TextBuffer::<TextSpan>::new("[00:00:00] Inspector started\n[00:00:00] Scene loaded: 5 objects"),
+                    TextBuffer::<TextSpan>::new(
+                        "[00:00:00] Inspector started\n[00:00:00] Scene loaded: 5 objects",
+                    ),
                     LineStyles::default(),
                     TextFont::from_font_size(font_size).with_font(font.clone()),
                     TextColor(Color::srgb(0.6, 0.7, 0.6)),
@@ -404,7 +408,9 @@ fn on_sidebar_click(
         return;
     }
     let entity = trigger.event().entity;
-    let Some(metrics) = row_metrics.get(entity) else { return };
+    let Some(metrics) = row_metrics.get(entity) else {
+        return;
+    };
     if let Some(row) = metrics.pick_row_from_hit(&trigger.event().hit) {
         if (row as usize) < OBJECTS.len() {
             state.selected = row as usize;
@@ -416,7 +422,11 @@ fn on_sidebar_click(
 fn rebuild_properties_on_selection(
     mut state: ResMut<InspectorState>,
     mut sidebar_q: Query<
-        (&mut TextBuffer<TextSpan>, &mut LineStyles, &mut TextUnderlays),
+        (
+            &mut TextBuffer<TextSpan>,
+            &mut LineStyles,
+            &mut TextUnderlays,
+        ),
         (With<SidebarPanel>, Without<PropertiesPanel>),
     >,
     mut props_q: Query<
@@ -473,8 +483,11 @@ fn tick_log_panel(
     let h = secs / 3600;
     let m = (secs % 3600) / 60;
     let s = secs % 60;
-    let msg = format!("[{:02}:{:02}:{:02}] Frame {} — selected: {}",
-        h, m, s,
+    let msg = format!(
+        "[{:02}:{:02}:{:02}] Frame {} — selected: {}",
+        h,
+        m,
+        s,
         time.elapsed_secs() as u64,
         OBJECTS[state.selected].name,
     );
@@ -487,4 +500,3 @@ fn tick_log_panel(
         scroll.y = layout.scroll_to_bottom_target(viewport_h);
     }
 }
-

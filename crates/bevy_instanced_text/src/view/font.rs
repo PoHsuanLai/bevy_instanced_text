@@ -87,7 +87,9 @@ pub struct MonoCellWidth {
 
 impl MonoCellWidth {
     pub fn from_font_size(font_size: f32) -> Self {
-        Self { px: font_size * 0.6 }
+        Self {
+            px: font_size * 0.6,
+        }
     }
 }
 

@@ -301,7 +301,11 @@ fn walk_back_to_boundary<T: TextContent>(content: &T, offset: usize, escape_char
 }
 
 /// Helper for [`Selection::expand_semantic`]: walk right until a boundary char.
-fn walk_forward_to_boundary<T: TextContent>(content: &T, offset: usize, escape_chars: &str) -> usize {
+fn walk_forward_to_boundary<T: TextContent>(
+    content: &T,
+    offset: usize,
+    escape_chars: &str,
+) -> usize {
     let len = content.char_count();
     if offset >= len {
         return len;

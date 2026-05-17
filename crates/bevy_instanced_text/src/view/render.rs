@@ -14,9 +14,9 @@ use bevy::prelude::*;
 use crate::gpu::GlyphAtlas;
 
 use super::font::FontSynthesis;
-use super::pipeline::{line_x_at_byte, DisplayLayout};
+use super::glyph::{ShapedLine, TextDecoration, TextFormat};
 use super::overlay::RectOverlay;
-use super::glyph::{ShapedLine, TextFormat, TextDecoration};
+use super::pipeline::{line_x_at_byte, DisplayLayout};
 use bevy::ui::ComputedNode;
 
 /// Resolved font faces for one render call. The renderer picks per-run
@@ -225,10 +225,10 @@ pub fn render_layout(
         let line_height = line.line_height.unwrap_or(default_line_height);
         // Glyph baseline derived from row top.
         let base_y = line.y_top + line_height * 0.5 + baseline_offset;
-        let line_width = line.shape.as_ref().map_or(
-            line.text.len() as f32 * char_width,
-            |s| s.width,
-        );
+        let line_width = line
+            .shape
+            .as_ref()
+            .map_or(line.text.len() as f32 * char_width, |s| s.width);
         let justify_offset = match justify {
             bevy::text::Justify::Left => 0.0,
             bevy::text::Justify::Center => (content_width - line_width).max(0.0) * 0.5,
@@ -257,10 +257,7 @@ pub fn render_layout(
                 position: Vec2::new(margin + bg_x_start, line.y_top),
                 uv_min: atlas.solid_uv.uv_min,
                 uv_max: atlas.solid_uv.uv_max,
-                size: Vec2::new(
-                    logical.x - margin * 2.0 - bg_x_start,
-                    line_height,
-                ),
+                size: Vec2::new(logical.x - margin * 2.0 - bg_x_start, line_height),
                 color: linear_rgba(bg),
                 z_index: 0.0,
                 corner_radii: [line_corner_radius; 4],
@@ -692,7 +689,6 @@ fn emit_run_glyphs_only(
         );
     }
 }
-
 
 #[allow(clippy::too_many_arguments)]
 fn push_overlay_quad(

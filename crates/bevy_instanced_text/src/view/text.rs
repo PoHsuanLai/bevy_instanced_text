@@ -83,7 +83,11 @@ pub trait TextContent: Send + Sync + 'static {
             }
             let local_start = start.saturating_sub(acc);
             let local_end = (end - acc).min(len);
-            let s: String = line.chars().skip(local_start).take(local_end - local_start).collect();
+            let s: String = line
+                .chars()
+                .skip(local_start)
+                .take(local_end - local_start)
+                .collect();
             out.push_str(&s);
             acc = line_end;
         }

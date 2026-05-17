@@ -80,12 +80,8 @@ type DragQuery<'w, 's, T> = Query<
     With<DisplayLayout>,
 >;
 
-type CopyQuery<'w, 's, T> = Query<
-    'w,
-    's,
-    (&'static SelectionState, &'static TextBuffer<T>),
-    With<DisplayLayout>,
->;
+type CopyQuery<'w, 's, T> =
+    Query<'w, 's, (&'static SelectionState, &'static TextBuffer<T>), With<DisplayLayout>>;
 
 /// Convert screen coordinates (viewport-local, 0,0 at top-left) to a character
 /// position in the text. Generic over any [`TextContent`]; uses the trait's
@@ -406,10 +402,7 @@ pub fn on_pointer_press<T: TextContent + Component>(
         match mode {
             crate::selection::SelectionMode::Semantic => {
                 let mut s = crate::selection::Selection::cursor(char_pos);
-                s.expand_semantic(
-                    &**buffer,
-                    crate::selection::DEFAULT_SEMANTIC_ESCAPE_CHARS,
-                );
+                s.expand_semantic(&**buffer, crate::selection::DEFAULT_SEMANTIC_ESCAPE_CHARS);
                 sel.selections.clear_secondary();
                 *sel.selections.primary_mut() = s;
             }
@@ -503,8 +496,7 @@ pub fn on_pointer_drag<T: TextContent + Component>(
     }
 
     let inv_scale = computed.inverse_scale_factor();
-    let node_top_left_logical =
-        (ui_transform.translation.xy() - computed.size() * 0.5) * inv_scale;
+    let node_top_left_logical = (ui_transform.translation.xy() - computed.size() * 0.5) * inv_scale;
     let local_pos = cursor_pos - node_top_left_logical;
     let text_area_left = computed.content_inset().min_inset.x * inv_scale;
     let text_area_top = computed.content_inset().min_inset.y * inv_scale;
@@ -529,10 +521,7 @@ pub fn on_pointer_drag<T: TextContent + Component>(
             let mut s = crate::selection::Selection::with_mode(char_pos, start, mode);
             match mode {
                 crate::selection::SelectionMode::Semantic => {
-                    s.expand_semantic(
-                        &**buffer,
-                        crate::selection::DEFAULT_SEMANTIC_ESCAPE_CHARS,
-                    );
+                    s.expand_semantic(&**buffer, crate::selection::DEFAULT_SEMANTIC_ESCAPE_CHARS);
                 }
                 crate::selection::SelectionMode::Line => {
                     s.expand_to_lines(&**buffer);

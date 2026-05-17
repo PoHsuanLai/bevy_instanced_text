@@ -12,10 +12,10 @@ use bevy::picking::DefaultPickingPlugins;
 use bevy::prelude::*;
 use bevy_instanced_text::TextContent;
 
-use crate::interaction_states::{ScrollConfig, TextViewDragState};
 use crate::focus::{
     on_focused_keyboard, on_pointer_drag, on_pointer_press, on_pointer_release, on_pointer_scroll,
 };
+use crate::interaction_states::{ScrollConfig, TextViewDragState};
 
 /// Picking + keyboard interaction for text-view entities of content type `T`.
 /// Pair with [`bevy_instanced_text::InstancedTextPlugins`] for the rendering side.
@@ -53,7 +53,11 @@ impl<T: TextContent + Component> Plugin for InstancedTextInteractionPlugin<T> {
         // InstancedTextInteractionPlugin::<T> are protected by the bool below
         // so duplicate observers don't fire.
         let key = std::any::TypeId::of::<T>();
-        let already = app.world().get_resource::<RegisteredContentTypes>().map(|r| r.0.contains(&key)).unwrap_or(false);
+        let already = app
+            .world()
+            .get_resource::<RegisteredContentTypes>()
+            .map(|r| r.0.contains(&key))
+            .unwrap_or(false);
         if !already {
             app.add_observer(on_pointer_press::<T>);
             app.add_observer(on_pointer_drag::<T>);
