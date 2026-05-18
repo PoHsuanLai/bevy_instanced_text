@@ -46,6 +46,14 @@ pub trait ClipboardProvider: Send + Sync + 'static {
     /// writes are best-effort; a missing backend should never propagate
     /// to the caller.
     fn set_text(&self, text: &str);
+
+    /// Write HTML to the clipboard alongside `alt_text` (the plain-text
+    /// fallback consumers without rich-text awareness read). Default
+    /// implementation falls back to `set_text(alt_text)`, so providers
+    /// that don't support HTML don't have to implement it.
+    fn set_html(&self, _html: &str, alt_text: &str) {
+        self.set_text(alt_text);
+    }
 }
 
 /// Resource holding the active clipboard backend. Inserted by
@@ -66,6 +74,10 @@ impl ClipboardResource {
 
     pub fn set_text(&self, text: &str) {
         self.0.set_text(text);
+    }
+
+    pub fn set_html(&self, html: &str, alt_text: &str) {
+        self.0.set_html(html, alt_text);
     }
 }
 
@@ -139,6 +151,12 @@ impl ClipboardProvider for SystemClipboard {
     fn set_text(&self, text: &str) {
         if let Ok(mut clipboard) = arboard::Clipboard::new() {
             let _ = clipboard.set_text(text.to_owned());
+        }
+    }
+
+    fn set_html(&self, html: &str, alt_text: &str) {
+        if let Ok(mut clipboard) = arboard::Clipboard::new() {
+            let _ = clipboard.set_html(html.to_owned(), Some(alt_text.to_owned()));
         }
     }
 }
