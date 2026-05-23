@@ -7,6 +7,7 @@
 //! `Text` node would.
 
 use bevy::{
+    camera::visibility::InheritedVisibility,
     ecs::{
         entity::EntityHashMap,
         query::QueryItem,
@@ -49,6 +50,22 @@ impl Plugin for InstancedTextRenderPlugin {
     fn build(&self, app: &mut App) {
         bevy::asset::embedded_asset!(app, "text.wgsl");
 
+        // Default `ExtractComponentPlugin` extracts unconditionally;
+        // we filter by `InheritedVisibility` ourselves in
+        // `extract_component`, matching how `bevy_ui_render`'s
+        // extracts gate on UI element visibility. Going through
+        // `extract_visible()` (which keys on `ViewVisibility`) won't
+        // work for UI text — `ViewVisibility` is set by
+        // `check_visibility`, which requires `GlobalTransform`, and
+        // our batch entities live under UI parents that have
+        // `UiGlobalTransform` instead.
+        //
+        // The batch is parented under the text-view entity (see
+        // `update_text_views`), so when the text-view or any
+        // ancestor goes `Visibility::Hidden`, the standard
+        // `visibility_propagate_system` cascade reaches the batch's
+        // `InheritedVisibility` and our `extract_component` returns
+        // `None`, dropping the batch from the render world.
         app.add_plugins((
             ExtractComponentPlugin::<GlyphBatchComponent>::default(),
             ExtractComponentPlugin::<BatchTransform>::default(),
@@ -84,26 +101,32 @@ impl Plugin for InstancedTextRenderPlugin {
 }
 
 impl ExtractComponent for GlyphBatchComponent {
-    type QueryData = &'static GlyphBatchComponent;
+    type QueryData = (&'static GlyphBatchComponent, &'static InheritedVisibility);
     type QueryFilter = ();
     type Out = Self;
 
-    fn extract_component(item: QueryItem<'_, '_, Self::QueryData>) -> Option<Self> {
+    fn extract_component((batch, vis): QueryItem<'_, '_, Self::QueryData>) -> Option<Self> {
+        if !vis.get() {
+            return None;
+        }
         Some(GlyphBatchComponent {
-            instances: item.instances.clone(),
-            atlas_texture: item.atlas_texture.clone(),
-            render_layer: item.render_layer,
+            instances: batch.instances.clone(),
+            atlas_texture: batch.atlas_texture.clone(),
+            render_layer: batch.render_layer,
         })
     }
 }
 
 impl ExtractComponent for BatchTransform {
-    type QueryData = &'static BatchTransform;
+    type QueryData = (&'static BatchTransform, &'static InheritedVisibility);
     type QueryFilter = ();
     type Out = Self;
 
-    fn extract_component(item: QueryItem<'_, '_, Self::QueryData>) -> Option<Self> {
-        Some(*item)
+    fn extract_component((bt, vis): QueryItem<'_, '_, Self::QueryData>) -> Option<Self> {
+        if !vis.get() {
+            return None;
+        }
+        Some(*bt)
     }
 }
 

@@ -329,22 +329,36 @@ pub fn update_text_views(
 
         if let Some(batch_e) = batch_entity_opt {
             let mut cmds = commands.entity(batch_e.0);
+            // `Inherited` (not `Visible`) so the parent text-view's
+            // visibility can hide this batch via the propagate cascade.
+            // `Visible` here would override and force-draw regardless
+            // of any ancestor `Visibility::Hidden`.
             cmds.insert(batch_comp)
                 .insert(batch_transform)
-                .insert(Visibility::Visible)
+                .insert(Visibility::Inherited)
                 .insert(batch_data);
             if let Some(layers) = render_layers {
                 cmds.insert(layers.clone());
             }
         } else {
+            // Parent the batch under the text-view so Bevy's
+            // `propagate_visibility` cascade reaches its
+            // `InheritedVisibility`. Our custom render-world extract
+            // (`extract_visible_ui_components`) then gates on that —
+            // matching how bevy_ui_render handles UI element
+            // visibility. We deliberately don't use bevy's
+            // `extract_visible()` helper since it gates on
+            // `ViewVisibility`, which is set by `check_visibility`
+            // and that system requires `GlobalTransform` (UI nodes
+            // have `UiGlobalTransform`, not `GlobalTransform`).
             let mut entity_cmds = commands.spawn((
                 batch_comp,
                 batch_transform,
                 batch_data,
                 Name::new("TextViewBatch"),
-                Visibility::Visible,
+                Visibility::Inherited,
                 InheritedVisibility::default(),
-                ViewVisibility::default(),
+                ChildOf(tv_entity),
             ));
             if let Some(layers) = render_layers {
                 entity_cmds.insert(layers.clone());
