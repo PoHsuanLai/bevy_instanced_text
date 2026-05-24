@@ -25,6 +25,7 @@ bevy = { version = "0.18", default-features = false, features = [
     "bevy_ui_render",
 ] }
 bevy_camera = "0.18"
+taffy = { version = "0.9", default-features = false, features = ["std"] }
 
 bitflags = "2"
 cosmic-text = "0.12"

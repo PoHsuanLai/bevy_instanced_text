@@ -16,10 +16,10 @@ use bevy::math::Affine2;
 use bevy::prelude::*;
 use bevy::ui::{
     ui_transform::UiGlobalTransform, CalculatedClip, ComputedNode, ComputedUiTargetCamera,
-    IsDefaultUiCamera, ScrollPosition, UiSystems,
+    ContentSize, IsDefaultUiCamera, Measure, MeasureArgs, NodeMeasure, ScrollPosition, UiSystems,
 };
 
-use super::font::{MonoCellWidth, MonoFontFaces};
+use super::font::{resolve_line_height, MonoCellWidth, MonoFontFaces};
 use super::measurement::LayoutTuning;
 use super::overlay::{TextOverlays, TextUnderlays};
 use super::pipeline::DisplayLayout;
@@ -33,6 +33,23 @@ pub use bevy::text::{TextBackgroundColor, TextColor};
 /// Contains `update_text_views`. Order downstream `.after(TextViewRenderSet)`.
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct TextViewRenderSet;
+
+/// Taffy `Measure` reporting a `TextBuffer`'s intrinsic line height so flex
+/// containers can size the node without callers setting an explicit `height`.
+/// Width is left to the parent / explicit `Node::width`; we only contribute
+/// the cross-axis hint so `align_items: Center` lines a label up with siblings.
+#[derive(Clone, Copy)]
+struct TextBufferMeasure {
+    line_height: f32,
+}
+
+impl Measure for TextBufferMeasure {
+    fn measure(&mut self, args: MeasureArgs<'_>, _style: &taffy::Style) -> bevy::math::Vec2 {
+        // If the parent already constrained width, honor it; otherwise report 0.
+        let width = args.width.unwrap_or(0.0);
+        bevy::math::Vec2::new(width, self.line_height)
+    }
+}
 
 /// Links a text view to its batch rendering entity. Managed by `update_text_views`.
 #[derive(Component, Reflect)]
@@ -92,6 +109,8 @@ impl<T: TextContent + Component> Plugin for TextContentPlugin<T> {
         app.world_mut()
             .register_required_components::<TextBuffer<T>, Node>();
         app.world_mut()
+            .register_required_components::<TextBuffer<T>, ContentSize>();
+        app.world_mut()
             .register_required_components::<TextBuffer<T>, Visibility>();
         app.world_mut()
             .register_required_components_with::<TextBuffer<T>, InheritedVisibility>(|| {
@@ -102,12 +121,36 @@ impl<T: TextContent + Component> Plugin for TextContentPlugin<T> {
 
         app.add_systems(
             PostUpdate,
-            produce_layouts::<T>
-                .run_if(atlas_ready)
-                .in_set(LayoutProduceSet)
-                .after(UiSystems::Layout)
-                .before(prewarm_atlas_for_layout),
+            (
+                measure_text_buffer::<T>.in_set(UiSystems::Content),
+                produce_layouts::<T>
+                    .run_if(atlas_ready)
+                    .in_set(LayoutProduceSet)
+                    .after(UiSystems::Layout)
+                    .before(prewarm_atlas_for_layout),
+            ),
         );
+    }
+}
+
+/// Installs a [`TextBufferMeasure`] on every `TextBuffer<T>` entity so bevy_ui
+/// knows their intrinsic line height. Runs in `UiSystems::Content`, before
+/// taffy lays out the tree. Only updates when `LineHeight` or `TextFont`
+/// changes so layout invalidation stays minimal.
+fn measure_text_buffer<T: TextContent + Component>(
+    mut q: Query<
+        (&mut ContentSize, &bevy::text::LineHeight, &TextFont),
+        (
+            With<TextBuffer<T>>,
+            Or<(Changed<bevy::text::LineHeight>, Changed<TextFont>, Added<ContentSize>)>,
+        ),
+    >,
+) {
+    for (mut content_size, line_height, font) in q.iter_mut() {
+        let lh = resolve_line_height(*line_height, font.font_size);
+        content_size.set(NodeMeasure::Custom(Box::new(TextBufferMeasure {
+            line_height: lh,
+        })));
     }
 }
 
