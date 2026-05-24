@@ -190,36 +190,6 @@ impl RowMetrics {
         self.row_y_top(display_row) + self.line_height * 0.5 + self.baseline_offset
     }
 
-    /// `Node::top` value for a `bevy_ui` [`Text`](bevy::ui::widget::Text)
-    /// child of the editor that should sit with its baseline on
-    /// `display_row`'s baseline.
-    ///
-    /// Use for sibling UI text — inlay hints, inline diagnostic labels,
-    /// CodeLens annotations — that has to align with the editor's
-    /// instanced glyphs without sharing a flex container. The child must
-    /// use `position_type: Absolute` and the returned value as `top`;
-    /// pair with [`cell_top_left_at_x`](Self::cell_top_left_at_x) `.x`
-    /// for `left`.
-    ///
-    /// `font_size` is the child's own font size (may differ from the
-    /// editor's — e.g. inlay hints render smaller). `line_height` is the
-    /// child's resolved `LineHeight` in px; pass
-    /// [`resolve_line_height`](super::font::resolve_line_height) of the
-    /// child's `LineHeight` to get this. The child's baseline-offset is
-    /// taken as [`DEFAULT_BASELINE_OFFSET_RATIO`] `* font_size`, which
-    /// matches Bevy's text pipeline for any font without per-font
-    /// overrides.
-    pub fn ui_text_top_at_row_baseline(
-        &self,
-        display_row: u32,
-        font_size: f32,
-        line_height: f32,
-    ) -> f32 {
-        let child_baseline_from_top =
-            line_height * 0.5 + font_size * DEFAULT_BASELINE_OFFSET_RATIO;
-        self.glyph_baseline_y(display_row) - child_baseline_from_top
-    }
-
     pub fn cell_width(&self) -> f32 {
         self.char_width
     }

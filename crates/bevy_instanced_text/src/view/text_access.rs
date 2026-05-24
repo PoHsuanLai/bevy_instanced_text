@@ -258,6 +258,7 @@ pub(crate) fn build_display_layout(
         let mut runs: Vec<TextFormat> = Vec::with_capacity(styled.len());
         let mut byte_cursor = 0usize;
         let mut concat = String::new();
+        let mut virtual_ranges: Vec<core::ops::Range<usize>> = Vec::new();
         for r in &styled {
             let len = r.text.len();
             if len == 0 {
@@ -267,6 +268,9 @@ pub(crate) fn build_display_layout(
             let mut format = r.format.clone();
             format.byte_range = byte_cursor..byte_cursor + len;
             runs.push(format);
+            if r.is_virtual {
+                virtual_ranges.push(byte_cursor..byte_cursor + len);
+            }
             byte_cursor += len;
         }
 
@@ -308,9 +312,13 @@ pub(crate) fn build_display_layout(
         // When wrap is on and the shaped line exceeds the budget, split into
         // multiple rows. Otherwise emit a single row covering the full text.
         let wrap_split = match (wrap_width, shape.as_ref()) {
-            (Some(budget), Some(s)) if s.width > budget => {
-                Some(wrap_into_rows(&render_text, &runs, s, budget))
-            }
+            (Some(budget), Some(s)) if s.width > budget => Some(wrap_into_rows(
+                &render_text,
+                &runs,
+                &virtual_ranges,
+                s,
+                budget,
+            )),
             _ => None,
         };
 
@@ -339,6 +347,7 @@ pub(crate) fn build_display_layout(
                         padding_top: 0.0,
                         padding_bottom: 0.0,
                         shape: Some(row_shape),
+                        virtual_byte_ranges: row.virtual_byte_ranges.clone(),
                     });
                     current_display_row += 1;
                 }
@@ -358,6 +367,7 @@ pub(crate) fn build_display_layout(
                     padding_top: 0.0,
                     padding_bottom: 0.0,
                     shape,
+                    virtual_byte_ranges: virtual_ranges,
                 });
                 current_display_row += 1;
             }
@@ -405,14 +415,19 @@ pub struct WrapRow {
     pub width: f32,
     /// Byte offset within the source buffer line where this row's `text` starts.
     pub buffer_byte_offset: usize,
+    /// Virtual byte ranges that fell within this row, rebased to row-local
+    /// `text` coordinates. See [`ShapedLine::virtual_byte_ranges`].
+    pub virtual_byte_ranges: Vec<core::ops::Range<usize>>,
 }
 
 /// Split a shaped line into pixel-budgeted rows, preferring word-break
 /// boundaries. The input `shape.glyphs[*].byte_index` are byte offsets into
-/// `text`; emitted rows carry sliced text/runs and per-row local glyph x.
+/// `text`; emitted rows carry sliced text/runs/virtual ranges and per-row
+/// local glyph x.
 pub fn wrap_into_rows(
     text: &str,
     runs: &[TextFormat],
+    virtual_ranges: &[core::ops::Range<usize>],
     shape: &LineShape,
     budget: f32,
 ) -> Vec<WrapRow> {
@@ -449,6 +464,7 @@ pub fn wrap_into_rows(
             let buf_byte_start = shape.glyphs[row_start_idx].byte_index;
             let row_text = text[buf_byte_start..].to_string();
             let row_runs = slice_runs(runs, buf_byte_start..text.len());
+            let row_virtuals = slice_ranges(virtual_ranges, buf_byte_start..text.len());
             let row_width = shape.width - row_origin_x;
             rows.push(WrapRow {
                 text: row_text,
@@ -456,6 +472,7 @@ pub fn wrap_into_rows(
                 glyphs: row_glyphs,
                 width: row_width,
                 buffer_byte_offset: buf_byte_start,
+                virtual_byte_ranges: row_virtuals,
             });
             break;
         }
@@ -493,6 +510,7 @@ pub fn wrap_into_rows(
             .collect();
         let row_text = text[row_byte_start..row_byte_end].to_string();
         let row_runs = slice_runs(runs, row_byte_start..row_byte_end);
+        let row_virtuals = slice_ranges(virtual_ranges, row_byte_start..row_byte_end);
         let row_width = if chosen < shape.glyphs.len() {
             shape.glyphs[chosen].x - row_origin_x
         } else {
@@ -504,6 +522,7 @@ pub fn wrap_into_rows(
             glyphs: row_glyphs,
             width: row_width,
             buffer_byte_offset: row_byte_start,
+            virtual_byte_ranges: row_virtuals,
         });
 
         row_start_idx = chosen;
@@ -515,6 +534,27 @@ pub fn wrap_into_rows(
     }
 
     rows
+}
+
+/// Clip and rebase a slice of byte ranges to a byte sub-range. Mirrors
+/// [`slice_runs`] but for opaque ranges (e.g. virtual byte ranges) that
+/// don't carry per-run style.
+pub fn slice_ranges(
+    ranges: &[std::ops::Range<usize>],
+    sub: std::ops::Range<usize>,
+) -> Vec<std::ops::Range<usize>> {
+    let mut out = Vec::new();
+    for r in ranges {
+        if r.end <= sub.start || r.start >= sub.end {
+            continue;
+        }
+        let s = r.start.max(sub.start) - sub.start;
+        let e = r.end.min(sub.end) - sub.start;
+        if s < e {
+            out.push(s..e);
+        }
+    }
+    out
 }
 
 /// Clip and rebase a slice of runs to a byte sub-range.
@@ -571,6 +611,7 @@ pub fn approx_display_rows_for_line(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashMap;
 
     fn test_font() -> TextFont {
         TextFont::from_font_size(14.0)
@@ -777,5 +818,122 @@ mod tests {
             after_texts
         );
         assert!(after_texts[2].starts_with('d'), "row 2 should be 'd' now");
+    }
+
+    /// `slice_ranges` clips each range to the sub-range and rebases its
+    /// endpoints to start at 0.
+    #[test]
+    fn slice_ranges_clips_and_rebases() {
+        let ranges = vec![2..5, 8..12, 14..16];
+        let out = slice_ranges(&ranges, 4..14);
+        // 2..5 → clipped to 4..5 → rebased to 0..1
+        // 8..12 → fully inside → rebased to 4..8
+        // 14..16 → at the edge → dropped (start == sub.end)
+        assert_eq!(out, vec![0..1, 4..8]);
+    }
+
+    /// Build a layout from styled spans (no atlas → no shape, but the
+    /// virtual-range tracking lives in the concat loop which runs
+    /// regardless of shaping).
+    fn build_with_styles(buffer_text: &str, by_line: HashMap<u32, Vec<FormattedSpan>>) -> DisplayLayout {
+        let styles = LineStyles::new(by_line);
+        let mut metrics = ContentMetrics::default();
+        build_display_layout(
+            &buffer_text.to_owned(),
+            0.0,
+            0.0,
+            &mut metrics,
+            &test_computed(),
+            &test_font(),
+            test_line_height(),
+            &test_mono(),
+            TextBounds::default(),
+            Color::WHITE,
+            None,
+            Some(&styles),
+            None,
+            None,
+            VIEWPORT_BUFFER_LINES,
+        )
+    }
+
+    fn span(text: &str, virtual_: bool) -> FormattedSpan {
+        FormattedSpan {
+            text: text.to_string(),
+            format: TextFormat::fg(0..0, Color::WHITE),
+            is_virtual: virtual_,
+        }
+    }
+
+    /// A virtual span between two source spans shows up on the row's
+    /// `virtual_byte_ranges` at the right concat-byte offset.
+    #[test]
+    fn virtual_span_recorded_in_shaped_line() {
+        let mut by_line = HashMap::new();
+        // Source bytes 0..7 ("fn foo("), virtual 7..16 ("[: i32 v]"),
+        // source 16..19 (")xy").
+        by_line.insert(
+            0u32,
+            vec![
+                span("fn foo(", false),
+                span("[: i32 v]", true),
+                span(")xy", false),
+            ],
+        );
+        let layout = build_with_styles("fn foo()xy\n", by_line);
+        let row = &layout.lines[0];
+
+        assert_eq!(row.text, "fn foo([: i32 v])xy");
+        assert_eq!(row.virtual_byte_ranges, vec![7..16]);
+        // Runs are concat-relative, byte_range covers all three spans.
+        assert_eq!(row.runs.len(), 3);
+        assert_eq!(row.runs[0].byte_range, 0..7);
+        assert_eq!(row.runs[1].byte_range, 7..16);
+        assert_eq!(row.runs[2].byte_range, 16..19);
+    }
+
+    /// Source spans before and after with no virtual produce an empty
+    /// virtual_byte_ranges — the default, no-op case.
+    #[test]
+    fn no_virtuals_means_empty_ranges() {
+        let mut by_line = HashMap::new();
+        by_line.insert(
+            0u32,
+            vec![span("hello", false), span(" world", false)],
+        );
+        let layout = build_with_styles("hello world\n", by_line);
+        assert!(layout.lines[0].virtual_byte_ranges.is_empty());
+    }
+
+    /// `x_at_byte` for a source byte past a virtual span should land at
+    /// the concat-byte position of that source byte (after the virtual
+    /// glyphs in the shape). Without an atlas, `line_x_at_byte` falls
+    /// back to the char_width walk over `text` — it counts virtual bytes
+    /// too in that fallback, so the returned x reflects the post-virtual
+    /// position. That's the desired behavior.
+    #[test]
+    fn x_at_byte_past_virtual_lands_past_it() {
+        let mut by_line = HashMap::new();
+        by_line.insert(
+            0u32,
+            vec![
+                span("ab", false),
+                span("XX", true),  // 2 bytes virtual
+                span("cd", false),
+            ],
+        );
+        let layout = build_with_styles("abcd\n", by_line);
+
+        // char_width = 8.0 → with fallback, each byte takes 8 px.
+        // Source byte 2 (start of "cd") sits at concat byte 4 (after "ab"+"XX").
+        let x_at_source_2 = layout.x_at_byte(0, 2).unwrap();
+        // Source byte 0: concat 0 → x = 0.
+        let x_at_source_0 = layout.x_at_byte(0, 0).unwrap();
+        assert_eq!(x_at_source_0, 0.0);
+        // Past virtual: source byte 2 → concat byte 4 → 4 * 8 = 32 px.
+        assert!(
+            (x_at_source_2 - 32.0).abs() < 0.01,
+            "expected x ~ 32 (concat byte 4 past 'XX'), got {x_at_source_2}",
+        );
     }
 }

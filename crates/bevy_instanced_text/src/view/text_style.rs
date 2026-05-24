@@ -89,8 +89,16 @@ impl Default for TextBounds {
 /// the engine then rebases each span's `format.byte_range` to match its
 /// position in the concatenation. `format.byte_range` on input is ignored —
 /// set it to `0..0` (or anything) when constructing.
+///
+/// `is_virtual` marks the span as inline decoration text — it participates
+/// in shaping (subsequent glyphs are pushed right) but is invisible to
+/// byte-addressed APIs like cursor movement, selection, and
+/// `DisplayLayout::x_at_byte` / `byte_at_x`. Use for inlay hints, ghost-
+/// text autosuggest, inline diff annotations — any text that should render
+/// inline but isn't part of the source buffer.
 #[derive(Clone, Debug)]
 pub struct FormattedSpan {
     pub text: String,
     pub format: TextFormat,
+    pub is_virtual: bool,
 }

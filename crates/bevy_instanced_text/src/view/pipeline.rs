@@ -72,23 +72,36 @@ impl DisplayLayout {
         (self.total_content_height() - viewport_height).max(0.0)
     }
 
-    /// Pixel x where `byte` begins within `display_row`, line-local (does not
-    /// include `ShapedLine.x_offset`). Uses shaped advances when present;
-    /// falls back to a `char_width` walk over `text` otherwise.
+    /// Pixel x where source `byte` begins within `display_row`, line-local
+    /// (does not include `ShapedLine.x_offset`). Uses shaped advances when
+    /// present; falls back to a `char_width` walk over `text` otherwise.
+    ///
+    /// `byte` is a **source** byte — a byte that exists in the source
+    /// buffer. Virtual spans inserted by producers don't count toward
+    /// this offset; the returned x falls *after* any preceding virtual
+    /// runs on the row (so a click after the inlay hint lands past it).
     ///
     /// Returns `None` if `display_row` is not in this layout's visible window.
     pub fn x_at_byte(&self, display_row: u32, byte: usize) -> Option<f32> {
         let line = self.lines.iter().find(|l| l.display_row == display_row)?;
-        Some(line_x_at_byte(line, byte, self.char_width))
+        let concat = line.concat_byte_for_source_byte(byte);
+        Some(line_x_at_byte(line, concat, self.char_width))
     }
 
-    /// Byte offset within `display_row` at pixel x (line-local). Inverse of `x_at_byte`.
-    /// Snaps to the nearest cluster boundary using shaped advances when present.
+    /// Source byte offset within `display_row` at pixel x (line-local).
+    /// Inverse of `x_at_byte`. Snaps to the nearest cluster boundary using
+    /// shaped advances when present.
+    ///
+    /// If the click lands inside a virtual span (an inlay hint, etc.) it
+    /// snaps to the source byte at the virtual range's left edge if the
+    /// click is in the range's left half, otherwise to the source byte at
+    /// the right edge. Returned bytes always refer to source positions.
     ///
     /// Returns `None` if `display_row` is not in this layout's visible window.
     pub fn byte_at_x(&self, display_row: u32, x: f32) -> Option<usize> {
         let line = self.lines.iter().find(|l| l.display_row == display_row)?;
-        Some(line_byte_at_x(line, x, self.char_width))
+        let concat = line_byte_at_x(line, x, self.char_width);
+        Some(concat_to_source_with_snap(line, concat, x))
     }
 
     /// Layout-local pixel position `(x, y_top)` of the given byte within
@@ -108,7 +121,8 @@ impl DisplayLayout {
     /// Returns `None` if `display_row` is not in this layout's visible window.
     pub fn pos_at_byte(&self, display_row: u32, byte: usize) -> Option<Vec2> {
         let line = self.lines.iter().find(|l| l.display_row == display_row)?;
-        let x = line.x_offset + line_x_at_byte(line, byte, self.char_width);
+        let concat = line.concat_byte_for_source_byte(byte);
+        let x = line.x_offset + line_x_at_byte(line, concat, self.char_width);
         Some(Vec2::new(x, line.y_top))
     }
 
@@ -132,6 +146,42 @@ impl DisplayLayout {
         let local = byte_in_line.saturating_sub(line.buffer_byte_offset);
         Some((line.display_row, local.min(line.text.len())))
     }
+}
+
+/// Translate a concat-byte hit-test result into a source-byte position,
+/// snapping out of any virtual range the concat byte falls inside.
+///
+/// Snap direction: if `x_for_snap` is in the left half of the virtual
+/// run, the click is closer to its left edge — return the source byte at
+/// that edge. Otherwise return the source byte at the right edge.
+fn concat_to_source_with_snap(line: &ShapedLine, concat_byte: usize, x_for_snap: f32) -> usize {
+    let Some(range) = line.virtual_range_at_concat_byte(concat_byte) else {
+        return line.source_byte_for_concat_byte(concat_byte, false);
+    };
+    // Find the x extent of the virtual range from shaped glyphs.
+    let (range_left_x, range_right_x) = if let Some(shape) = &line.shape {
+        let left = shape
+            .glyphs
+            .iter()
+            .find(|g| g.byte_index >= range.start)
+            .map(|g| g.x)
+            .unwrap_or(0.0);
+        let right = shape
+            .glyphs
+            .iter()
+            .find(|g| g.byte_index >= range.end)
+            .map(|g| g.x)
+            .unwrap_or(shape.width);
+        (left, right)
+    } else {
+        // Fallback: treat each byte as char_width-wide (rough but only used
+        // when no shape is attached, which is itself an approximation).
+        (range.start as f32, range.end as f32)
+    };
+    let mid = (range_left_x + range_right_x) * 0.5;
+    let snap_right = x_for_snap >= mid;
+    let edge_concat = if snap_right { range.end } else { range.start };
+    line.source_byte_for_concat_byte(edge_concat, snap_right)
 }
 
 /// Line-local pixel x for a byte offset. Reused by `render.rs` for run start

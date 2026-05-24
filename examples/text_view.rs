@@ -189,6 +189,7 @@ fn setup_text_view(
             .map(|r| FormattedSpan {
                 text: _text.clone(),
                 format: r.clone(),
+                is_virtual: false,
             })
             .collect();
         by_line.insert(i as u32, row_runs);

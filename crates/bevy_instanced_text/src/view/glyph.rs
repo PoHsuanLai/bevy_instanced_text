@@ -213,4 +213,165 @@ pub struct ShapedLine {
     /// `char_width` fallback (cheap path for `trivial_layout` consumers like
     /// chat/log demos that don't want to pay shaping cost).
     pub shape: Option<Arc<LineShape>>,
+    /// Byte ranges in `text` that came from `FormattedSpan { is_virtual: true }`
+    /// — inline decoration text that shapes with the row but is invisible
+    /// to byte-addressed APIs (cursor, selection, `x_at_byte`, `byte_at_x`).
+    /// Sorted, non-overlapping, in `text`-relative byte coordinates.
+    pub virtual_byte_ranges: Vec<Range<usize>>,
+}
+
+impl ShapedLine {
+    /// Translate a source-byte offset (a byte the cursor can occupy — one
+    /// that exists in the source buffer, not inserted by a virtual span)
+    /// into the corresponding concat-byte offset in `text`. Concat bytes
+    /// are what `runs[*].byte_range` and `shape.glyphs[*].byte_index`
+    /// reference.
+    ///
+    /// The mapping skips over any virtual ranges whose start is `<=` the
+    /// source position: each preceding virtual run shifts the source byte
+    /// right by its length.
+    pub fn concat_byte_for_source_byte(&self, source_byte: usize) -> usize {
+        let mut concat = source_byte;
+        for range in &self.virtual_byte_ranges {
+            if range.start <= concat {
+                concat += range.end - range.start;
+            } else {
+                break;
+            }
+        }
+        concat
+    }
+
+    /// Translate a concat-byte offset (a position in `text` / `runs` /
+    /// `shape.glyphs`) into the corresponding source-byte offset. A
+    /// concat byte that falls *inside* a virtual range snaps to the
+    /// source byte at the range's left edge (`snap_right == false`) or
+    /// right edge (`snap_right == true`).
+    pub fn source_byte_for_concat_byte(&self, concat_byte: usize, snap_right: bool) -> usize {
+        let mut source = concat_byte;
+        for range in &self.virtual_byte_ranges {
+            if range.end <= concat_byte {
+                source -= range.end - range.start;
+            } else if range.start <= concat_byte {
+                // concat_byte falls inside this virtual range — snap.
+                source -= concat_byte - range.start;
+                if snap_right {
+                    // Don't advance past the range; the source byte at the
+                    // right edge of the gap is the next source position.
+                }
+                break;
+            } else {
+                break;
+            }
+        }
+        source
+    }
+
+    /// `Some(range)` if `concat_byte` is inside a virtual range on this
+    /// row. Returned range is in concat-byte coordinates.
+    pub fn virtual_range_at_concat_byte(&self, concat_byte: usize) -> Option<Range<usize>> {
+        self.virtual_byte_ranges
+            .iter()
+            .find(|r| r.start <= concat_byte && concat_byte < r.end)
+            .cloned()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `ShapedLine` with everything but `virtual_byte_ranges` zeroed — the
+    /// helpers under test ignore the rest.
+    fn line_with_virtuals(text: &str, virtuals: Vec<Range<usize>>) -> ShapedLine {
+        ShapedLine {
+            display_row: 0,
+            buffer_row: 0,
+            buffer_byte_offset: 0,
+            is_wrap_continuation: false,
+            y_top: 0.0,
+            x_offset: 0.0,
+            text: text.to_string(),
+            runs: Vec::new(),
+            line_bg: None,
+            line_height: None,
+            padding_top: 0.0,
+            padding_bottom: 0.0,
+            shape: None,
+            virtual_byte_ranges: virtuals,
+        }
+    }
+
+    /// Source byte 0 maps to concat byte 0 when no virtual precedes it,
+    /// and to concat byte = virtual_len when one virtual span starts at 0.
+    #[test]
+    fn source_to_concat_skips_preceding_virtuals() {
+        // "fn foo([: i32 v])bar"  — virtual "[: i32 v]" at concat bytes 7..16
+        // (length 9). Source bytes: "fn foo(" (0..7) then "bar" (7..10).
+        let line = line_with_virtuals("fn foo([: i32 v])bar", vec![7..16]);
+
+        // Source byte 0 → concat 0
+        assert_eq!(line.concat_byte_for_source_byte(0), 0);
+        // Source byte 7 (start of "bar") → concat 16 (past the virtual run)
+        assert_eq!(line.concat_byte_for_source_byte(7), 16);
+        // Source byte 10 (end) → concat 19
+        assert_eq!(line.concat_byte_for_source_byte(10), 19);
+    }
+
+    /// Concat byte before the virtual range round-trips; after it skips
+    /// back to the source byte at the virtual range's right edge.
+    #[test]
+    fn concat_to_source_skips_back_over_virtuals() {
+        let line = line_with_virtuals("fn foo([: i32 v])bar", vec![7..16]);
+
+        assert_eq!(line.source_byte_for_concat_byte(0, false), 0);
+        assert_eq!(line.source_byte_for_concat_byte(7, false), 7);
+        // Concat byte 16 (just past the virtual) → source byte 7 (next source position).
+        assert_eq!(line.source_byte_for_concat_byte(16, false), 7);
+        assert_eq!(line.source_byte_for_concat_byte(19, false), 10);
+    }
+
+    /// Concat bytes inside a virtual range snap to the left or right edge
+    /// based on `snap_right`.
+    #[test]
+    fn concat_to_source_snaps_inside_virtual_range() {
+        let line = line_with_virtuals("fn foo([: i32 v])bar", vec![7..16]);
+
+        // concat 10 falls inside 7..16.
+        // snap_right=false: snap to the left edge → source 7.
+        assert_eq!(line.source_byte_for_concat_byte(10, false), 7);
+        // snap_right=true: snap to the right edge → source 7 too (same
+        // source byte sits at both edges of the virtual gap).
+        assert_eq!(line.source_byte_for_concat_byte(10, true), 7);
+    }
+
+    /// Detects whether a concat byte is inside a virtual range.
+    #[test]
+    fn virtual_range_at_concat_byte_finds_containing_range() {
+        let line = line_with_virtuals("abXXXcd", vec![2..5]);
+
+        assert!(line.virtual_range_at_concat_byte(1).is_none());
+        assert_eq!(line.virtual_range_at_concat_byte(2), Some(2..5));
+        assert_eq!(line.virtual_range_at_concat_byte(4), Some(2..5));
+        assert!(line.virtual_range_at_concat_byte(5).is_none());
+    }
+
+    /// Multiple virtual ranges compose: cumulative virtual length is
+    /// applied each time the source byte crosses one.
+    #[test]
+    fn multiple_virtuals_compose() {
+        // "a[X]b[YY]c" with virtuals 1..4 (`[X]`) and 5..9 (`[YY]`).
+        // Source layout: "a" (0..1), "b" (1..2), "c" (2..3).
+        let line = line_with_virtuals("a[X]b[YY]c", vec![1..4, 5..9]);
+
+        assert_eq!(line.concat_byte_for_source_byte(0), 0);
+        assert_eq!(line.concat_byte_for_source_byte(1), 4); // past [X]
+        assert_eq!(line.concat_byte_for_source_byte(2), 9); // past [X] and [YY]
+        assert_eq!(line.concat_byte_for_source_byte(3), 10);
+
+        assert_eq!(line.source_byte_for_concat_byte(0, false), 0);
+        assert_eq!(line.source_byte_for_concat_byte(4, false), 1);
+        assert_eq!(line.source_byte_for_concat_byte(9, false), 2);
+        assert_eq!(line.source_byte_for_concat_byte(10, false), 3);
+    }
 }

@@ -326,6 +326,7 @@ fn build_sidebar_styles(text: &str, selected: usize) -> LineStyles {
                     vec![FormattedSpan {
                         text: line.to_string(),
                         format: TextFormat::fg(0..len, color),
+                        is_virtual: false,
                     }],
                 )
             })
@@ -366,6 +367,7 @@ fn build_props_styles(obj: &SceneObject) -> LineStyles {
         vec![FormattedSpan {
             text: heading_text,
             format: TextFormat::fg(0..heading_len, heading),
+            is_virtual: false,
         }],
     )]);
 
@@ -381,10 +383,12 @@ fn build_props_styles(obj: &SceneObject) -> LineStyles {
                 FormattedSpan {
                     format: TextFormat::fg(0..key_part.len(), key_color),
                     text: key_part,
+                    is_virtual: false,
                 },
                 FormattedSpan {
                     format: TextFormat::fg(0..val_part.len(), val_color),
                     text: val_part,
+                    is_virtual: false,
                 },
             ],
         );
