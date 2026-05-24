@@ -480,7 +480,7 @@ mod instanced_extensions {
             if italic {
                 attrs = attrs.style(cosmic_text::Style::Italic);
             }
-            let attrs_list = AttrsList::new(attrs);
+            let attrs_list = AttrsList::new(&attrs);
 
             let line = ShapeLine::new(
                 &mut self.font_system,
@@ -501,6 +501,7 @@ mod instanced_extensions {
                 None,
                 &mut layout_lines,
                 None,
+                cosmic_text::Hinting::default(),
             );
 
             let shape = if layout_lines.is_empty() {

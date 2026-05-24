@@ -28,6 +28,6 @@ bevy_camera = "0.18"
 taffy = { version = "0.9", default-features = false, features = ["std"] }
 
 bitflags = "2"
-cosmic-text = "0.12"
-swash = "0.1"
+cosmic-text = "0.16"
+swash = "0.2"
 bytemuck = { version = "1.14", features = ["derive"] }
