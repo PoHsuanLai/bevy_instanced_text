@@ -317,27 +317,13 @@ pub fn render_layout(
                 );
             }
         } else {
-            // Per-line running offset for runs after a `font_scale != 1.0`
-            // run. The master `LineShape` is shaped at the editor's
-            // `font_size` for every byte (including those in scaled runs),
-            // so a smaller-than-1.0 inlay's slot in the master shape is
-            // wider than the scaled glyphs actually paint. Without this,
-            // subsequent source glyphs land at the master slot's right
-            // edge, leaving a visible gap between the scaled run and the
-            // next source character (and conversely, the scaled glyphs
-            // hug the left of their slot, sitting too close to the source
-            // glyph before them). `pen_shift` accumulates `rendered_w -
-            // slot_w` per run and is added to the next run's `seg_x_start`
-            // / `seg_x_end`.
-            let mut pen_shift: f32 = 0.0;
             for run in &line.runs {
                 if line.text.get(run.byte_range.clone()).is_none() {
                     continue;
                 }
 
-                let seg_x_start =
-                    line_byte_to_x(line, run.byte_range.start, char_width) + pen_shift;
-                let seg_x_end = line_byte_to_x(line, run.byte_range.end, char_width) + pen_shift;
+                let seg_x_start = line_byte_to_x(line, run.byte_range.start, char_width);
+                let seg_x_end = line_byte_to_x(line, run.byte_range.end, char_width);
 
                 let bold = run_is_bold(run);
                 let italic = run.italic;
@@ -376,7 +362,7 @@ pub fn render_layout(
                 // glyphs' actual ink bounds (not the advance edges, which
                 // include trailing side-bearing whitespace). For runs
                 // without a bg, take the cheap shaped-or-unshaped path.
-                let rendered_w = if let Some(bg) = run.bg {
+                if let Some(bg) = run.bg {
                     if line.line_bg != Some(bg) {
                         emit_run_with_bg(
                             line,
@@ -396,7 +382,7 @@ pub fn render_layout(
                             shape_usable,
                             &mut below_instances,
                             &mut text_instances,
-                        )
+                        );
                     } else {
                         emit_run_glyphs_only(
                             line,
@@ -411,7 +397,7 @@ pub fn render_layout(
                             italic,
                             shape_usable,
                             &mut text_instances,
-                        )
+                        );
                     }
                 } else {
                     emit_run_glyphs_only(
@@ -427,28 +413,10 @@ pub fn render_layout(
                         italic,
                         shape_usable,
                         &mut text_instances,
-                    )
-                };
-
-                // Only adjust on the shape-on-demand path, where
-                // `rendered_w` reflects the actual painted advance. On
-                // the shaped fast path the master `LineShape` already
-                // accounts for every glyph at the line's font_size, so
-                // the slot is the rendered width by construction.
-                if rendered_w > 0.0 {
-                    let slot_w = (seg_x_end - seg_x_start).max(0.0);
-                    pen_shift += rendered_w - slot_w;
+                    );
                 }
 
                 if !run.decoration.is_empty() {
-                    // For scaled runs the rendered glyphs span less than
-                    // the master-shape slot — size the underline / strike
-                    // to match what's actually painted.
-                    let deco_end = if rendered_w > 0.0 {
-                        seg_x_start + rendered_w
-                    } else {
-                        seg_x_end
-                    };
                     emit_run_decoration(
                         run.decoration,
                         run.fg,
@@ -456,7 +424,7 @@ pub fn render_layout(
                         line_height,
                         baseline_offset,
                         seg_x_start,
-                        deco_end,
+                        seg_x_end,
                         atlas.solid_uv,
                         &mut text_instances,
                     );
@@ -591,10 +559,6 @@ struct RunMetrics {
 /// Shaping a per-frame slice is cheap — it's the same code path the producer
 /// uses, just narrowed to the run. For monospace ASCII it yields advances
 /// byte-identical to the old `col * char_width` walk.
-///
-/// Returns the run's shaped width (advance from first to last+1 glyph),
-/// used by the caller to track per-run width when a `font_scale` shrinks
-/// (or grows) a run relative to its master-shape slot.
 #[allow(clippy::too_many_arguments)]
 fn emit_unshaped_run_glyphs(
     line: &ShapedLine,
@@ -607,9 +571,9 @@ fn emit_unshaped_run_glyphs(
     bold: bool,
     italic: bool,
     out: &mut Vec<GlyphInstance>,
-) -> f32 {
+) {
     let Some(slice) = line.text.get(range) else {
-        return 0.0;
+        return;
     };
     let shape_text = slice.strip_suffix('\n').unwrap_or(slice);
     let shape = atlas.shape_line_styled(shape_text, metrics.font_size, font_id, bold, italic);
@@ -619,7 +583,6 @@ fn emit_unshaped_run_glyphs(
         };
         push_glyph(info, metrics.start_x + g.x, anchor, style, out);
     }
-    shape.width
 }
 
 /// Emit a per-run background quad spanning the run's advance bounds, then
@@ -645,30 +608,12 @@ fn emit_run_with_bg(
     shape_usable: Option<&Arc<super::glyph::LineShape>>,
     below: &mut Vec<GlyphInstance>,
     text: &mut Vec<GlyphInstance>,
-) -> f32 {
+) {
     let baseline_y_off = line_height * 0.5 + baseline_offset;
     let cap_to_descender = baseline_y_off + baseline_offset * 0.6;
     let text_band_above = cap_to_descender * 0.25;
     let band_top_y_off = baseline_y_off - text_band_above;
-    // Emit glyphs first so we know the run's real shaped width; size the
-    // bg to that instead of the master-shape slot when they differ
-    // (a `font_scale != 1.0` run paints narrower / wider than its slot).
-    let rendered_w = emit_run_glyphs_only(
-        line,
-        run,
-        anchor,
-        style,
-        seg_x_start,
-        seg_font_size,
-        atlas,
-        run_face,
-        bold,
-        italic,
-        shape_usable,
-        text,
-    );
-    let slot_w = (seg_x_end - seg_x_start).max(0.0);
-    let bg_w = if rendered_w > 0.0 { rendered_w } else { slot_w };
+    let bg_w = (seg_x_end - seg_x_start).max(0.0);
     // Spans the glyph band, matching `RectOverlay { vertical: Full }`.
     below.push(GlyphInstance {
         position: Vec2::new(
@@ -685,17 +630,23 @@ fn emit_run_with_bg(
         _padding: [0.0; 2],
     });
 
-    rendered_w
+    emit_run_glyphs_only(
+        line,
+        run,
+        anchor,
+        style,
+        seg_x_start,
+        seg_font_size,
+        atlas,
+        run_face,
+        bold,
+        italic,
+        shape_usable,
+        text,
+    );
 }
 
 /// Emit just the run's glyphs — shape-or-unshaped path, no bg, no extra work.
-///
-/// Returns the run's actual rendered advance width along the shape-on-demand
-/// path (only meaningful when `shape_usable` is `None`, i.e., the line fell
-/// off the master-shape fast path because at least one run requested
-/// `font_scale != 1.0` or a non-regular face). Callers compare this against
-/// the master-shape slot width to detect runs that under- or over-fill their
-/// slot, and shift subsequent runs accordingly.
 #[allow(clippy::too_many_arguments)]
 fn emit_run_glyphs_only(
     line: &ShapedLine,
@@ -710,7 +661,7 @@ fn emit_run_glyphs_only(
     italic: bool,
     shape_usable: Option<&Arc<super::glyph::LineShape>>,
     out: &mut Vec<GlyphInstance>,
-) -> f32 {
+) {
     if let Some(shape) = shape_usable {
         emit_shaped_run_glyphs(
             &shape.glyphs,
@@ -720,7 +671,6 @@ fn emit_run_glyphs_only(
             atlas,
             out,
         );
-        0.0
     } else {
         emit_unshaped_run_glyphs(
             line,
@@ -736,7 +686,7 @@ fn emit_run_glyphs_only(
             bold,
             italic,
             out,
-        )
+        );
     }
 }
 
