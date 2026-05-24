@@ -936,4 +936,45 @@ mod tests {
             "expected x ~ 32 (concat byte 4 past 'XX'), got {x_at_source_2}",
         );
     }
+
+    /// A highlight overlay sized to `[source_start, source_end)` must not
+    /// include any virtual span anchored at `source_end`. This is the
+    /// bracket-match / find-highlight case — without this helper, the
+    /// rect would visually engulf an adjacent inlay hint.
+    #[test]
+    fn x_after_source_range_excludes_trailing_virtual() {
+        let mut by_line = HashMap::new();
+        by_line.insert(
+            0,
+            vec![
+                span("a", false), // source 0..1
+                span("b", false), // source 1..2
+                span("XX", true), // virtual at concat 2..4, anchored after source byte 2
+                span("c", false), // source 2..3
+            ],
+        );
+        let layout = build_with_styles("abc\n", by_line);
+
+        // Highlight source byte 1 alone ("b"). `x_at_byte(2)` would jump
+        // past the virtual ("XX"), so a naive `x_at_byte(1)..x_at_byte(2)`
+        // span would cover "b" + the virtual. `x_after_source_range(0, 1, 2)`
+        // stops at concat byte 2 = right edge of "b".
+        let x_start = layout.x_at_byte(0, 1).unwrap();
+        let x_end = layout.x_after_source_range(0, 1, 2).unwrap();
+        let x_end_naive = layout.x_at_byte(0, 2).unwrap();
+
+        // char_width = 8.0. Source 1 ("b") → concat 1 → x = 8.
+        // x_end should be concat 2 → x = 16 (right edge of "b", before "XX").
+        // x_end_naive is concat 4 → x = 32 (past "XX"), confirming the bug
+        // shape: the naive form is 16 px wider than reality.
+        assert!((x_start - 8.0).abs() < 0.01, "x_start={x_start}");
+        assert!(
+            (x_end - 16.0).abs() < 0.01,
+            "x_end={x_end} (should sit at right edge of 'b', concat byte 2)",
+        );
+        assert!(
+            (x_end_naive - 32.0).abs() < 0.01,
+            "x_end_naive={x_end_naive} (jumps past virtual to concat 4)",
+        );
+    }
 }

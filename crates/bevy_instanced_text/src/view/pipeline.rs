@@ -88,6 +88,37 @@ impl DisplayLayout {
         Some(line_x_at_byte(line, concat, self.char_width))
     }
 
+    /// Pixel x at the right edge of a source-byte range's rendered glyphs in
+    /// `display_row`, line-local. Differs from `x_at_byte(end_byte)` when a
+    /// virtual span (e.g. an inlay hint) is anchored at `end_byte`:
+    /// `x_at_byte(end_byte)` would jump past the virtual run, whereas this
+    /// returns the source glyphs' own trailing edge — so a highlight box
+    /// over `[start_byte, end_byte)` sits flush against the source text and
+    /// does not engulf the adjacent inlay.
+    ///
+    /// Use this when sizing an overlay or background to a specific source
+    /// span: bracket-match highlights, find highlights, single-character
+    /// selection rendering. `x_at_byte(start)..x_after_source_range(start, end)`
+    /// gives the correct rendered span for the source bytes themselves,
+    /// excluding any adjacent virtual decoration.
+    ///
+    /// Source bytes are contiguous in concat space (virtuals can only sit
+    /// between source bytes, not inside them), so the concat range is just
+    /// `[concat_for(start), concat_for(start) + (end - start))`.
+    ///
+    /// Returns `None` if `display_row` is not in this layout's visible window.
+    pub fn x_after_source_range(
+        &self,
+        display_row: u32,
+        start_byte: usize,
+        end_byte: usize,
+    ) -> Option<f32> {
+        let line = self.lines.iter().find(|l| l.display_row == display_row)?;
+        let concat_start = line.concat_byte_for_source_byte(start_byte);
+        let concat_end = concat_start + end_byte.saturating_sub(start_byte);
+        Some(line_x_at_byte(line, concat_end, self.char_width))
+    }
+
     /// Source byte offset within `display_row` at pixel x (line-local).
     /// Inverse of `x_at_byte`. Snaps to the nearest cluster boundary using
     /// shaped advances when present.
