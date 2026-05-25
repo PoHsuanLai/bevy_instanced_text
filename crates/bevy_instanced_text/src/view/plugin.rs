@@ -45,8 +45,12 @@ struct TextBufferMeasure {
 
 impl Measure for TextBufferMeasure {
     fn measure(&mut self, args: MeasureArgs<'_>, _style: &taffy::Style) -> bevy::math::Vec2 {
-        // If the parent already constrained width, honor it; otherwise report 0.
-        let width = args.width.unwrap_or(0.0);
+        use bevy::ui::AvailableSpace;
+        let width = args.width.unwrap_or_else(|| match args.available_width {
+            AvailableSpace::Definite(w) => w,
+            AvailableSpace::MinContent => 0.0,
+            AvailableSpace::MaxContent => f32::MAX,
+        });
         bevy::math::Vec2::new(width, self.line_height)
     }
 }
