@@ -223,7 +223,7 @@ pub fn update_text_views(
             Entity,
             &ScrollPosition,
             &ComputedNode,
-            &UiGlobalTransform,
+            Ref<UiGlobalTransform>,
             Option<&CalculatedClip>,
             Option<&ComputedUiTargetCamera>,
             &TextFont,
@@ -284,6 +284,7 @@ pub fn update_text_views(
         if !layout.is_changed()
             && !underlays.is_changed()
             && !overlays.is_changed()
+            && !ui_transform.is_changed()
             && batch_entity_opt.is_some()
         {
             continue;
