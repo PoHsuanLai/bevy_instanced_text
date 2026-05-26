@@ -234,6 +234,7 @@ pub fn update_text_views(
             Ref<TextOverlays>,
             Option<&TextViewBatchEntity>,
             Option<&bevy_camera::visibility::RenderLayers>,
+            Ref<InheritedVisibility>,
         ),
         With<DisplayLayout>,
     >,
@@ -257,6 +258,7 @@ pub fn update_text_views(
         overlays,
         batch_entity_opt,
         render_layers,
+        inherited_vis,
     ) in text_views.iter_mut()
     {
         let justify = text_layout.map(|t| t.justify).unwrap_or_default();
@@ -281,10 +283,15 @@ pub fn update_text_views(
             synthesis: faces_cfg.font_synthesis,
         };
         // Skip the rebuild if nothing changed — the GPU batch is still valid.
+        // `InheritedVisibility` must be checked so that a parent toggling
+        // `Display::None` → `Display::Flex` triggers a batch rebuild (the
+        // extraction layer gates on visibility, so the batch goes stale
+        // while hidden).
         if !layout.is_changed()
             && !underlays.is_changed()
             && !overlays.is_changed()
             && !ui_transform.is_changed()
+            && !inherited_vis.is_changed()
             && batch_entity_opt.is_some()
         {
             continue;
