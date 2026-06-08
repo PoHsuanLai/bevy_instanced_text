@@ -1,6 +1,6 @@
 [package]
 name = "bevy_instanced_text_interaction"
-version = "0.1.1"
+version = "0.1.0"
 edition = "2021"
 authors = ["PoHsuanLai"]
 license = "MIT OR Apache-2.0"
@@ -20,7 +20,7 @@ arboard = ["dep:arboard"]
 clipboard-wasm = ["dep:wasm-bindgen", "dep:wasm-bindgen-futures", "dep:js-sys", "dep:web-sys"]
 
 [dependencies]
-bevy_instanced_text = { path = "../bevy_instanced_text", version = "0.1.1" }
+bevy_instanced_text = { path = "../bevy_instanced_text", version = "0.1.0" }
 
 bevy = { version = "0.18", default-features = false, features = [
     "bevy_render",
