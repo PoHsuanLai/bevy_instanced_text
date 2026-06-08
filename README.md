@@ -91,14 +91,14 @@ fn setup(mut commands: Commands) {
 | Concern | Bevy UI `Text` | `bevy_instanced_text` | Same? |
 |---|---|---|---|
 | The string | `Text(String)` | `InstancedText<String>` (any `T: TextContent`) | swap component |
-| Font, size, line height | `TextFont` + `LineHeight` | `TextFont` + `LineHeight` | ✅ identical |
-| Foreground color | `TextColor` | `TextColor` | ✅ identical |
-| Background color | `TextBackgroundColor` | `TextBackgroundColor` | ✅ identical |
-| Justify | `TextLayout.justify` | `TextLayout.justify` | ✅ identical |
-| Line break (`NoWrap`/`WordBoundary`/`AnyCharacter`) | `TextLayout.linebreak` | `TextLayout.linebreak` | ✅ honored |
-| Auto-inserted style components | `#[require(...)]` | required components | ✅ spawn the buffer alone |
-| Sizing / padding / `width: auto` | `Node` + intrinsic measure | `Node` + intrinsic measure | ✅ equivalent |
-| Hit-testing & picking | Bevy UI | Bevy UI | ✅ identical |
+| Font, size, line height | `TextFont` + `LineHeight` | `TextFont` + `LineHeight` | identical |
+| Foreground color | `TextColor` | `TextColor` | identical |
+| Background color | `TextBackgroundColor` | `TextBackgroundColor` | identical |
+| Justify | `TextLayout.justify` | `TextLayout.justify` | identical |
+| Line break (`NoWrap`/`WordBoundary`/`AnyCharacter`) | `TextLayout.linebreak` | `TextLayout.linebreak` | honored |
+| Auto-inserted style components | `#[require(...)]` | required components | spawn the buffer alone |
+| Sizing / padding / `width: auto` | `Node` + intrinsic measure | `Node` + intrinsic measure | equivalent |
+| Hit-testing & picking | Bevy UI | Bevy UI | identical |
 | Per-run styling | child `TextSpan` entities | `LineStyles` + `TextFormat` runs | different model |
 | Bold / italic faces | font synthesis | `MonoFontFaces` (explicit faces) | different model |
 | Draw calls | one quad per glyph | **one instanced call per view** | the whole point |
