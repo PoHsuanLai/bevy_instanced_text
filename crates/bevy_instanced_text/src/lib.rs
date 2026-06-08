@@ -120,6 +120,6 @@ pub mod prelude {
         FormattedSpan, HiddenLines, InstancedTextPlugin, InstancedTextPlugins, LineStyles,
         MonoCellWidth, MonoFontFaces, RectOverlay, RowMetrics, RowMetricsParam, RowVertical,
         TextBackgroundColor, TextBounds, TextBuffer, TextColor, TextContent, TextContentPlugin,
-        TextFormat, TextOverlays, TextSpan, TextUnderlays,
+        TextFormat, TextLabel, TextOverlays, TextSpan, TextUnderlays,
     };
 }

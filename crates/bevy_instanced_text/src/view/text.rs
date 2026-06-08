@@ -228,6 +228,36 @@ impl<T: TextContent + Default> Default for TextBuffer<T> {
     }
 }
 
+impl<T: TextContent> From<T> for TextBuffer<T> {
+    fn from(content: T) -> Self {
+        Self(content)
+    }
+}
+
+impl From<&str> for TextBuffer<TextSpan> {
+    fn from(s: &str) -> Self {
+        Self(TextSpan::from(s))
+    }
+}
+
+impl From<String> for TextBuffer<TextSpan> {
+    fn from(s: String) -> Self {
+        Self(TextSpan::from(s))
+    }
+}
+
+/// A simple single-string text view — the instanced-text analog of Bevy UI's
+/// [`bevy::ui::widget::Text`]. Spawn it directly with `&str` / `String`
+/// to skip the `::<TextSpan>` turbofish:
+///
+/// ```rust,ignore
+/// commands.spawn(TextLabel::from("hello"));   // or TextLabel::new("hello")
+/// ```
+///
+/// For rope-backed editors or grid-backed terminals, use [`TextBuffer<T>`]
+/// directly with your own content type.
+pub type TextLabel = TextBuffer<TextSpan>;
+
 /// Recomputable layout cache — widest shaped line, used by external scroll UI to size horizontal extent.
 #[derive(Component, Default, Reflect)]
 #[reflect(Component, Default)]

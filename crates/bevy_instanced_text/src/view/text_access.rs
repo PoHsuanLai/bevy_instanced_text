@@ -101,6 +101,7 @@ pub struct LayoutRow<T: TextContent + Component> {
     hidden: Option<&'static HiddenLines>,
     styles: Option<&'static LineStyles>,
     wrap: Option<&'static TextBounds>,
+    text_layout: Option<&'static bevy::text::TextLayout>,
     tuning: Option<&'static super::measurement::LayoutTuning>,
     text_color: &'static bevy::text::TextColor,
 }
@@ -116,6 +117,7 @@ type LayoutChanged<T> = Or<(
     Changed<HiddenLines>,
     Changed<LineStyles>,
     Changed<TextBounds>,
+    Changed<bevy::text::TextLayout>,
     Changed<bevy::text::TextColor>,
 )>;
 
@@ -136,7 +138,17 @@ pub fn produce_layouts<T: TextContent + Component>(
             .tuning
             .map(|t| t.viewport_buffer_lines)
             .unwrap_or(VIEWPORT_BUFFER_LINES);
-        let wrap = row.wrap.copied().unwrap_or_default();
+        // Bevy's `TextLayout.linebreak` controls wrap behavior; the engine's
+        // `TextBounds.width` supplies the pixel budget. `NoWrap` overrides the
+        // budget off; `WordBoundary` / `AnyCharacter` pick the split strategy.
+        let linebreak = row
+            .text_layout
+            .map(|t| t.linebreak)
+            .unwrap_or(bevy::text::LineBreak::WordBoundary);
+        let mut wrap = row.wrap.copied().unwrap_or_default();
+        if matches!(linebreak, bevy::text::LineBreak::NoWrap) {
+            wrap.width = None;
+        }
         let line_height = crate::view::font::resolve_line_height(*row.line_height, row.font.font_size);
         let new_layout = build_display_layout(
             &**row.buffer,
@@ -148,6 +160,7 @@ pub fn produce_layouts<T: TextContent + Component>(
             line_height,
             row.mono,
             wrap,
+            linebreak,
             row.text_color.0,
             row.hidden,
             row.styles,
@@ -173,6 +186,7 @@ pub(crate) fn build_display_layout(
     line_height: f32,
     mono: &MonoCellWidth,
     wrap: TextBounds,
+    linebreak: bevy::text::LineBreak,
     default_fg: Color,
     hidden: Option<&HiddenLines>,
     styles: Option<&LineStyles>,
@@ -309,6 +323,7 @@ pub(crate) fn build_display_layout(
                 &virtual_ranges,
                 s,
                 budget,
+                linebreak,
             )),
             _ => None,
         };
@@ -411,16 +426,19 @@ pub struct WrapRow {
     pub virtual_byte_ranges: Vec<core::ops::Range<usize>>,
 }
 
-/// Split a shaped line into pixel-budgeted rows, preferring word-break
-/// boundaries. The input `shape.glyphs[*].byte_index` are byte offsets into
-/// `text`; emitted rows carry sliced text/runs/virtual ranges and per-row
-/// local glyph x.
+/// Split a shaped line into pixel-budgeted rows. With
+/// [`LineBreak::WordBoundary`](bevy::text::LineBreak) the split prefers the
+/// last whitespace before the budget; with `AnyCharacter` it breaks at the
+/// exact glyph that overflows. The input `shape.glyphs[*].byte_index` are byte
+/// offsets into `text`; emitted rows carry sliced text/runs/virtual ranges and
+/// per-row local glyph x.
 pub fn wrap_into_rows(
     text: &str,
     runs: &[TextFormat],
     virtual_ranges: &[core::ops::Range<usize>],
     shape: &LineShape,
     budget: f32,
+    linebreak: bevy::text::LineBreak,
 ) -> Vec<WrapRow> {
     if shape.glyphs.is_empty() || text.is_empty() {
         return Vec::new();
@@ -468,14 +486,17 @@ pub fn wrap_into_rows(
             break;
         }
 
-        // Try to break at the previous space/tab cluster.
+        // Try to break at the previous space/tab cluster. `AnyCharacter`
+        // skips the search and breaks exactly where the budget overflows.
         let mut chosen = break_idx;
-        for j in (row_start_idx + 1..break_idx).rev() {
-            let g = &shape.glyphs[j];
-            if let Some(ch) = text[g.byte_index..].chars().next() {
-                if ch == ' ' || ch == '\t' {
-                    chosen = j + 1; // break *after* the whitespace
-                    break;
+        if !matches!(linebreak, bevy::text::LineBreak::AnyCharacter) {
+            for j in (row_start_idx + 1..break_idx).rev() {
+                let g = &shape.glyphs[j];
+                if let Some(ch) = text[g.byte_index..].chars().next() {
+                    if ch == ' ' || ch == '\t' {
+                        chosen = j + 1; // break *after* the whitespace
+                        break;
+                    }
                 }
             }
         }
@@ -636,6 +657,7 @@ mod tests {
             test_line_height(),
             &test_mono(),
             TextBounds::default(),
+            bevy::text::LineBreak::WordBoundary,
             Color::WHITE,
             None,
             None,
@@ -839,6 +861,7 @@ mod tests {
             test_line_height(),
             &test_mono(),
             TextBounds::default(),
+            bevy::text::LineBreak::WordBoundary,
             Color::WHITE,
             None,
             Some(&styles),

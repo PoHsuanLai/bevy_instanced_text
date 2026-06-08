@@ -34,25 +34,50 @@ pub use bevy::text::{TextBackgroundColor, TextColor};
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct TextViewRenderSet;
 
-/// Taffy `Measure` reporting a `TextBuffer`'s intrinsic line height so flex
-/// containers can size the node without callers setting an explicit `height`.
-/// Width is left to the parent / explicit `Node::width`; we only contribute
-/// the cross-axis hint so `align_items: Center` lines a label up with siblings.
+/// Taffy `Measure` reporting a `TextBuffer`'s intrinsic size so flex
+/// containers can size the node without an explicit `Node::width`/`height` —
+/// mirroring how Bevy UI's `Text` measures. `line_height` is the cross-axis
+/// hint; `max_content_width` / `min_content_width` are approximate intrinsic
+/// widths (char count × cell width) used to resolve `width: auto` shrink-to-fit.
+///
+/// Widths are monospace estimates, not shaped extents — exact for the
+/// monospace fonts this engine targets, a close approximation otherwise. An
+/// explicit `Node::width` always wins; this only contributes when the parent
+/// asks for `MinContent` / `MaxContent`.
 #[derive(Clone, Copy)]
 struct TextBufferMeasure {
     line_height: f32,
+    max_content_width: f32,
+    min_content_width: f32,
 }
 
 impl Measure for TextBufferMeasure {
     fn measure(&mut self, args: MeasureArgs<'_>, _style: &taffy::Style) -> bevy::math::Vec2 {
         use bevy::ui::AvailableSpace;
         let width = args.width.unwrap_or_else(|| match args.available_width {
-            AvailableSpace::Definite(w) => w,
-            AvailableSpace::MinContent => 0.0,
-            AvailableSpace::MaxContent => f32::MAX,
+            AvailableSpace::Definite(w) => w.min(self.max_content_width),
+            AvailableSpace::MinContent => self.min_content_width,
+            AvailableSpace::MaxContent => self.max_content_width,
         });
         bevy::math::Vec2::new(width, self.line_height)
     }
+}
+
+/// Approximate intrinsic widths (max-content, min-content) for a buffer at a
+/// given cell width. Max-content = widest line; min-content = longest run
+/// between whitespace break opportunities. Both in logical pixels.
+fn intrinsic_widths<T: TextContent>(buffer: &T, cell_px: f32) -> (f32, f32) {
+    let mut max_chars = 0usize;
+    let mut min_chars = 0usize;
+    for i in 0..buffer.line_count() {
+        let line = buffer.line(i);
+        let trimmed = line.strip_suffix('\n').unwrap_or(&line);
+        max_chars = max_chars.max(trimmed.chars().count());
+        for word in trimmed.split(|c: char| c == ' ' || c == '\t') {
+            min_chars = min_chars.max(word.chars().count());
+        }
+    }
+    (max_chars as f32 * cell_px, min_chars as f32 * cell_px)
 }
 
 /// Links a text view to its batch rendering entity. Managed by `update_text_views`.
@@ -96,6 +121,8 @@ impl<T: TextContent + Component> Plugin for TextContentPlugin<T> {
         app.world_mut()
             .register_required_components::<TextBuffer<T>, TextColor>();
         app.world_mut()
+            .register_required_components::<TextBuffer<T>, bevy::text::TextLayout>();
+        app.world_mut()
             .register_required_components::<TextBuffer<T>, TextBackgroundColor>();
         app.world_mut()
             .register_required_components::<TextBuffer<T>, MonoFontFaces>();
@@ -138,22 +165,37 @@ impl<T: TextContent + Component> Plugin for TextContentPlugin<T> {
 }
 
 /// Installs a [`TextBufferMeasure`] on every `TextBuffer<T>` entity so bevy_ui
-/// knows their intrinsic line height. Runs in `UiSystems::Content`, before
-/// taffy lays out the tree. Only updates when `LineHeight` or `TextFont`
-/// changes so layout invalidation stays minimal.
+/// knows their intrinsic line height and width. Runs in `UiSystems::Content`,
+/// before taffy lays out the tree. Only updates when an input that affects the
+/// measured size changes so layout invalidation stays minimal.
 fn measure_text_buffer<T: TextContent + Component>(
     mut q: Query<
-        (&mut ContentSize, &bevy::text::LineHeight, &TextFont),
+        (
+            &mut ContentSize,
+            &TextBuffer<T>,
+            &bevy::text::LineHeight,
+            &TextFont,
+            &MonoCellWidth,
+        ),
         (
             With<TextBuffer<T>>,
-            Or<(Changed<bevy::text::LineHeight>, Changed<TextFont>, Added<ContentSize>)>,
+            Or<(
+                Changed<TextBuffer<T>>,
+                Changed<bevy::text::LineHeight>,
+                Changed<TextFont>,
+                Changed<MonoCellWidth>,
+                Added<ContentSize>,
+            )>,
         ),
     >,
 ) {
-    for (mut content_size, line_height, font) in q.iter_mut() {
+    for (mut content_size, buffer, line_height, font, mono) in q.iter_mut() {
         let lh = resolve_line_height(*line_height, font.font_size);
+        let (max_content_width, min_content_width) = intrinsic_widths(&**buffer, mono.px);
         content_size.set(NodeMeasure::Custom(Box::new(TextBufferMeasure {
             line_height: lh,
+            max_content_width,
+            min_content_width,
         })));
     }
 }
@@ -462,5 +504,34 @@ pub(crate) fn prewarm_atlas_for_layout(
                 .into_iter()
                 .flatten()
         }));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn intrinsic_width_max_is_widest_line() {
+        // Three lines; the middle one ("fourteen chars" = 14) is widest. Cell 10px.
+        let buffer = String::from("short\nfourteen chars\nmid");
+        let (max_w, _min_w) = intrinsic_widths(&buffer, 10.0);
+        assert_eq!(max_w, 140.0, "max-content = widest line's char count × cell");
+    }
+
+    #[test]
+    fn intrinsic_width_min_is_longest_word() {
+        // Longest whitespace-delimited run is "wrapping" (8 chars).
+        let buffer = String::from("a soft wrapping budget");
+        let (_max_w, min_w) = intrinsic_widths(&buffer, 10.0);
+        assert_eq!(min_w, 80.0, "min-content = longest unbreakable run × cell");
+    }
+
+    #[test]
+    fn intrinsic_width_ignores_trailing_newline() {
+        // Trailing '\n' adds a virtual empty line; it must not inflate width.
+        let buffer = String::from("abcd\n");
+        let (max_w, _min_w) = intrinsic_widths(&buffer, 10.0);
+        assert_eq!(max_w, 40.0);
     }
 }
