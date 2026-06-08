@@ -59,37 +59,37 @@ fn setup_text_view(
     let warn = Color::srgb(1.0, 0.75, 0.3);
 
     let lines = vec![
-        styled_line("Introduction", h1),
+        colored_line("Introduction", h1),
         plain_line(""),
-        styled_line(
+        colored_line(
             "If you came here to learn how to make 2D/3D games, visualizations,",
             body,
         ),
-        styled_line(
+        colored_line(
             "user interfaces, or other graphical applications with Bevy,",
             body,
         ),
-        styled_line("this is the right place.", body),
+        colored_line("this is the right place.", body),
         plain_line(""),
         plain_line(""),
-        styled_line("What's a BEVY?", h2),
+        colored_line("What's a BEVY?", h2),
         plain_line(""),
-        styled_line("A bevy is a group of birds!", body),
+        colored_line("A bevy is a group of birds!", body),
         plain_line(""),
-        styled_line(
+        colored_line(
             "Bevy is also described as \"a refreshingly simple data-driven",
             body,
         ),
-        styled_line(
+        colored_line(
             "game engine built in Rust.\" It is free and open-source under",
             body,
         ),
-        styled_line("the MIT or Apache 2.0 licenses.", body),
+        colored_line("the MIT or Apache 2.0 licenses.", body),
         plain_line(""),
         plain_line(""),
-        styled_line("Design Goals", h2),
+        colored_line("Design Goals", h2),
         plain_line(""),
-        styled_line("Bevy aims to be:", body),
+        colored_line("Bevy aims to be:", body),
         plain_line(""),
         multi_segment_line(vec![
             ("  Capable     ", bullet_key),
@@ -123,53 +123,53 @@ fn setup_text_view(
         ]),
         plain_line(""),
         plain_line(""),
-        styled_line("Development Philosophy", h2),
+        colored_line("Development Philosophy", h2),
         plain_line(""),
-        styled_line(
+        colored_line(
             "The engine is \"built in the open by volunteers\" using Rust.",
             body,
         ),
-        styled_line(
+        colored_line(
             "The developers emphasize that games represent millions of hours",
             body,
         ),
-        styled_line(
+        colored_line(
             "of human development effort, yet many developers rely on",
             body,
         ),
-        styled_line(
+        colored_line(
             "closed-source commercial engines that take revenue cuts.",
             body,
         ),
         plain_line(""),
         plain_line(""),
-        styled_line("Stability Warning", h2),
+        colored_line("Stability Warning", h2),
         plain_line(""),
-        styled_line(
+        colored_line(
             "Important features remain under development and documentation",
             warn,
         ),
-        styled_line(
+        colored_line(
             "may be limited. Breaking API changes occur approximately once",
             warn,
         ),
-        styled_line("every 3 months.", warn),
+        colored_line("every 3 months.", warn),
         plain_line(""),
-        styled_line(
+        colored_line(
             "Migration guides are provided, though migrations are not always",
             body,
         ),
-        styled_line("straightforward.", body),
+        colored_line("straightforward.", body),
         plain_line(""),
-        styled_line(
+        colored_line(
             "The page recommends Godot Engine for production projects",
             dim,
         ),
-        styled_line(
+        colored_line(
             "requiring stability, noting it offers similar open-source",
             dim,
         ),
-        styled_line("benefits with greater feature completeness.", dim),
+        colored_line("benefits with greater feature completeness.", dim),
     ];
 
     // Build rope text from the styled lines.
@@ -211,7 +211,7 @@ fn setup_text_view(
     ));
 }
 
-fn styled_line(text: &str, color: Color) -> (String, Vec<TextFormat>) {
+fn colored_line(text: &str, color: Color) -> (String, Vec<TextFormat>) {
     (text.to_string(), vec![TextFormat::fg(0..text.len(), color)])
 }
 

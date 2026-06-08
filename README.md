@@ -112,31 +112,29 @@ breaks at the exact overflowing glyph.
 
 **1. Rich / multi-style text uses a run model instead of child entities.**
 
-Bevy UI builds styled text from a tree of child `TextSpan` entities. This crate keeps the whole view in one component and attaches per-line styling as a `LineStyles` map — keyed by line number — of `FormattedSpan` runs, each carrying its text and a byte-range `TextFormat`:
+Bevy UI builds styled text from a tree of child `TextSpan` entities. This crate keeps the whole view in one component and attaches per-line styling as a `LineStyles` map — keyed by line number — of styled runs. For hand-authored labels, the `styled_line` / `styled_lines` helpers build both the buffer string and its styling from one source, so the text and the runs can't drift:
 
 ```rust
-use std::collections::HashMap;
-
 // Bevy UI: child spans
 commands.spawn(Text::new("normal ")).with_children(|p| {
     p.spawn((TextSpan::new("bold blue"), TextColor(Color::srgb(0.4, 0.6, 1.0))));
 });
 
-// bevy_instanced_text: per-line runs on one entity
-let blue = Color::srgb(0.4, 0.6, 1.0);
-let mut by_line = HashMap::new();
-by_line.insert(0, vec![
-    FormattedSpan { text: "normal ".into(), format: TextFormat::fg(0..0, Color::WHITE), is_virtual: false },
-    FormattedSpan { text: "bold blue".into(), format: TextFormat::fg(0..0, blue), is_virtual: false },
+// bevy_instanced_text: one entity, text derived from the runs
+let (text, styles) = styled_line([
+    ("normal ", fg(Color::WHITE)),
+    ("bold blue", fg(Color::srgb(0.4, 0.6, 1.0)).with_weight(700)),
 ]);
 commands.spawn((
-    InstancedText::<String>::new("normal bold blue"),
-    LineStyles::new(by_line),   // line 0's runs; engine rebases byte_range
+    InstancedText::<String>::new(text),   // `text` IS the runs, concatenated
+    styles,
     TextFont::from_font_size(16.0),
 ));
 ```
 
-The `format.byte_range` on input is ignored — the engine concatenates each line's run texts and rebases the ranges itself, so you set it to `0..0`. This flat run model is what lets the engine batch an entire syntax-highlighted document or a scrolling terminal into one draw — there are no per-span entities to walk.
+`fg(color)` is a foreground-only `TextFormat` starter — chain `.italic()`, `.with_bg(..)`, `.with_weight(..)`, etc. Multi-line styling uses `styled_lines([line0_runs, line1_runs, ..])`, joining lines with `\n`.
+
+Under the hood `LineStyles` is a flat `HashMap<line, Vec<run>>`; the engine concatenates each line's run texts and rebases their byte ranges itself. High-throughput producers (syntax highlighters, terminals) write that map directly via `LineStyles::new` — this flat model is what lets the engine batch a whole document into one draw, with no per-span entities to walk.
 
 **2. You add the plugin and a `Camera2d`.**
 

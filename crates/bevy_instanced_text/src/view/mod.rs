@@ -31,4 +31,6 @@ pub use plugin::{
 };
 pub use render::{BatchTransform, GlyphBatchComponent, GlyphInstance};
 pub use text::{ContentMetrics, InstancedText, TextContent};
-pub use text_style::{FormattedSpan, HiddenLines, LineStyles, TextBounds};
+pub use text_style::{
+    fg, span, styled_line, styled_lines, FormattedSpan, HiddenLines, LineStyles, TextBounds,
+};
