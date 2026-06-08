@@ -13,8 +13,8 @@
 //! picking, and layout are all handled by the UI system automatically.
 //!
 //! The content type `T` is anything that implements [`TextContent`]. The crate
-//! ships [`TextSpan`] (a `String` wrapper) for simple labels; editors plug in a
-//! rope-backed type and terminals plug in a grid-derived type.
+//! implements it for `String` (use `InstancedText<String>` for simple labels);
+//! editors plug in a rope-backed type and terminals plug in a grid-derived type.
 //!
 //! Components paired with [`InstancedText<T>`]:
 //!
@@ -71,7 +71,7 @@
 //!
 //! // Left text view — sized to half the window in logical pixels.
 //! commands.spawn((
-//!     bevy_instanced_text::InstancedText::<bevy_instanced_text::TextSpan>::new("left pane"),
+//!     bevy_instanced_text::InstancedText::<String>::new("left pane"),
 //!     Node { width: Val::Px(window.width() / 2.0), height: Val::Px(window.height()), ..default() },
 //!     RenderLayers::layer(0),
 //! ));
@@ -83,7 +83,6 @@
 //! ```rust,no_run
 //! use bevy::prelude::*;
 //! use bevy_instanced_text::prelude::*;
-//! use bevy_instanced_text::TextSpan; // disambiguate from `bevy::text::TextSpan`
 //!
 //! App::new()
 //!     .add_plugins(DefaultPlugins)
@@ -93,7 +92,7 @@
 //!         commands.spawn(Camera2d);
 //!         // Text view — size it with Node; padding insets the text area.
 //!         commands.spawn((
-//!             InstancedText::<TextSpan>::new("hello world"),
+//!             InstancedText::<String>::new("hello world"),
 //!             Node {
 //!                 width: Val::Vw(100.0),
 //!                 height: Val::Vh(100.0),
@@ -119,7 +118,7 @@ pub mod prelude {
         BufferAnchorParam, ContentMetrics, CornerRadii, DisplayLayout, FontSynthesis,
         FormattedSpan, HiddenLines, InstancedTextPlugin, InstancedTextPlugins, LineStyles,
         MonoCellWidth, MonoFontFaces, RectOverlay, RowMetrics, RowMetricsParam, RowVertical,
-        TextBackgroundColor, TextBounds, InstancedText, TextColor, TextContent, TextContentPlugin,
-        TextFormat, TextOverlays, TextSpan, TextUnderlays,
+        InstancedText, TextBackgroundColor, TextBounds, TextColor, TextContent, TextContentPlugin,
+        TextFormat, TextOverlays, TextUnderlays,
     };
 }

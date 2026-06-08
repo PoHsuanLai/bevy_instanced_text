@@ -42,7 +42,6 @@ use super::bounds::{row_metrics_with_baseline, RowMetrics, DEFAULT_BASELINE_OFFS
 use super::font::MonoCellWidth;
 use super::pipeline::DisplayLayout;
 use super::text::{InstancedText, TextContent};
-use bevy::ecs::component::Component;
 use bevy::text::TextFont;
 
 /// Resolved coordinates for a buffer position, in node-local logical
@@ -96,12 +95,12 @@ type BufferAnchorQuery<'w, 's, T> = Query<
 >;
 
 #[derive(SystemParam)]
-pub struct BufferAnchorParam<'w, 's, T: TextContent + Component = super::text::TextSpan> {
+pub struct BufferAnchorParam<'w, 's, T: TextContent = String> {
     query: BufferAnchorQuery<'w, 's, T>,
     _phantom: PhantomData<&'w T>,
 }
 
-impl<'w, 's, T: TextContent + Component> BufferAnchorParam<'w, 's, T> {
+impl<'w, 's, T: TextContent> BufferAnchorParam<'w, 's, T> {
     /// Anchor a buffer `(line, character)` on `entity`.
     ///
     /// `character` is a byte offset within the line when a layout is
@@ -263,7 +262,7 @@ mod tests {
         let line_height = bevy::text::LineHeight::Px(21.0);
         let mono = MonoCellWidth { px: 8.4 };
         let buffer =
-            InstancedText::<super::super::text::TextSpan>::new("hello world\nsecond line\nthird");
+            InstancedText::<String>::new("hello world\nsecond line\nthird");
         let mut layout = DisplayLayout::default();
         layout.baseline_offset = 14.0 * 0.32;
 
@@ -284,7 +283,7 @@ mod tests {
         let (mut world, entity) = make_editor_world();
         let (a, b) = world
             .run_system_once(
-                move |anchors: BufferAnchorParam<super::super::text::TextSpan>| {
+                move |anchors: BufferAnchorParam<String>| {
                     let a = anchors.at_buffer_pos(entity, 1, 3).unwrap();
                     // "hello world\n" = 12 chars, "sec" = 3 → char_index 15.
                     let b = anchors.at_char_index(entity, 15).unwrap();
@@ -309,7 +308,7 @@ mod tests {
         let font = bevy::text::TextFont::from_font_size(14.0);
         let line_height = bevy::text::LineHeight::Px(21.0);
         let mono = MonoCellWidth { px: 8.4 };
-        let buffer = InstancedText::<super::super::text::TextSpan>::new("plain text");
+        let buffer = InstancedText::<String>::new("plain text");
 
         let mut world = World::new();
         let entity = world
@@ -318,7 +317,7 @@ mod tests {
 
         let anchor = world
             .run_system_once(
-                move |anchors: BufferAnchorParam<super::super::text::TextSpan>| {
+                move |anchors: BufferAnchorParam<String>| {
                     anchors.at_buffer_pos(entity, 0, 5).unwrap()
                 },
             )
@@ -336,7 +335,7 @@ mod tests {
         let (mut world, entity) = make_editor_world();
         let anchor = world
             .run_system_once(
-                move |anchors: BufferAnchorParam<super::super::text::TextSpan>| {
+                move |anchors: BufferAnchorParam<String>| {
                     anchors.at_buffer_pos(entity, 1, 3).unwrap()
                 },
             )
@@ -362,7 +361,7 @@ mod tests {
         let (mut world, entity) = make_editor_world();
         let anchor = world
             .run_system_once(
-                move |anchors: BufferAnchorParam<super::super::text::TextSpan>| {
+                move |anchors: BufferAnchorParam<String>| {
                     anchors.at_buffer_pos(entity, 2, 4).unwrap()
                 },
             )

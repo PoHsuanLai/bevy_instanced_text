@@ -30,5 +30,5 @@ pub use plugin::{
     TextViewRenderSet,
 };
 pub use render::{BatchTransform, GlyphBatchComponent, GlyphInstance};
-pub use text::{ContentMetrics, InstancedText, TextContent, TextSpan};
+pub use text::{ContentMetrics, InstancedText, TextContent};
 pub use text_style::{FormattedSpan, HiddenLines, LineStyles, TextBounds};

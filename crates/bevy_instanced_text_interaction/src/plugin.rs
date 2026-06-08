@@ -1,8 +1,8 @@
 //! Pointer + keyboard interaction plugin for text-view entities.
 //!
 //! [`InstancedTextInteractionPlugin<T>`] is generic over the content type
-//! `T: TextContent + Component`. Each consumer registers the plugin once for
-//! every content type they want interactive — terminals add `<TextSpan>`,
+//! `T: TextContent`. Each consumer registers the plugin once for
+//! every content type they want interactive — terminals add `<String>`,
 //! editors add `<RopeBuffer>` (via `bevy_instanced_text_editor`'s editor plugin).
 
 use std::marker::PhantomData;
@@ -19,15 +19,15 @@ use crate::interaction_states::{ScrollConfig, TextViewDragState};
 
 /// Picking + keyboard interaction for text-view entities of content type `T`.
 /// Pair with [`bevy_instanced_text::InstancedTextPlugins`] for the rendering side.
-pub struct InstancedTextInteractionPlugin<T: TextContent + Component>(PhantomData<T>);
+pub struct InstancedTextInteractionPlugin<T: TextContent>(PhantomData<T>);
 
-impl<T: TextContent + Component> Default for InstancedTextInteractionPlugin<T> {
+impl<T: TextContent> Default for InstancedTextInteractionPlugin<T> {
     fn default() -> Self {
         Self(PhantomData)
     }
 }
 
-impl<T: TextContent + Component> Plugin for InstancedTextInteractionPlugin<T> {
+impl<T: TextContent> Plugin for InstancedTextInteractionPlugin<T> {
     fn build(&self, app: &mut App) {
         // Idempotent base infra — only register on first content-type instance.
         if !app.is_plugin_added::<bevy::picking::PickingPlugin>() {

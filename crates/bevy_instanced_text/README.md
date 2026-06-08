@@ -12,7 +12,6 @@ GPU-instanced text rendering for Bevy. Spawn an `InstancedText<T>` on a Bevy UI 
 ```rust
 use bevy::prelude::*;
 use bevy_instanced_text::prelude::*;
-use bevy_instanced_text::TextSpan; // disambiguate from `bevy::text::TextSpan`
 
 fn main() {
     App::new()
@@ -21,7 +20,7 @@ fn main() {
         .add_systems(Startup, |mut commands: Commands| {
             commands.spawn(Camera2d);
             commands.spawn((
-                InstancedText::<TextSpan>::new("hello world"),
+                InstancedText::<String>::new("hello world"),
                 Node {
                     width: Val::Vw(100.0),
                     height: Val::Vh(100.0),
@@ -38,7 +37,7 @@ fn main() {
 
 | Type | Role |
 |---|---|
-| `InstancedText<T>` | The content. Generic over any `T: TextContent` — ship-built impls include `TextSpan` (a `String` wrapper) and `String` itself; downstream crates plug in rope-backed types. Auto-cascades every renderer component a view needs. |
+| `InstancedText<T>` | The content. Generic over any `T: TextContent` — `String` is implemented out of the box for simple labels; downstream crates plug in rope-backed and grid-backed types. Auto-cascades every renderer component a view needs. |
 | `TextFont` | Per-entity font handle, size, hinting. Re-exported from `bevy::text`. |
 | `MonoFontFaces` | Optional bold/italic/bold-italic faces and font-synthesis policy for one-font-per-style layouts. |
 | `LineStyles` | Per-line styled runs (colors, bold, italic, inline backgrounds). Producers write this; the engine reads it. |
@@ -62,7 +61,7 @@ Use `DisplayLayout::buffer_to_display`, `x_at_byte`, and `RowMetricsParam` / `Bu
 
 ## Plugins
 
-`InstancedTextPlugins` bundles `GlyphAtlasPlugin` + `InstancedTextRenderPlugin` + `InstancedTextPlugin`. Add constituents individually for fine-grained control. Add one `TextContentPlugin::<T>` per `T: TextContent + Component` you spawn — `InstancedTextPlugin` already registers it for `TextSpan`.
+`InstancedTextPlugins` bundles `GlyphAtlasPlugin` + `InstancedTextRenderPlugin` + `InstancedTextPlugin`. Add constituents individually for fine-grained control. Add one `TextContentPlugin::<T>` per `T: TextContent` you spawn — `InstancedTextPlugin` already registers it for `String`.
 
 ## Bevy compatibility
 

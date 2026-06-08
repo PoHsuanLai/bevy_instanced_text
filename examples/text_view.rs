@@ -4,7 +4,7 @@
 //! can render styled text independently, without `CodeEditorPlugin`, cursor,
 //! selection, syntax highlighting, or keybindings.
 //!
-//! `InstancedTextInteractionPlugin::<TextSpan>` is added for mouse-wheel
+//! `InstancedTextInteractionPlugin::<String>` is added for mouse-wheel
 //! scrolling — it routes `Pointer<Scroll>` events to the hovered text view
 //! automatically, so no custom system is needed.
 
@@ -32,7 +32,7 @@ fn main() {
     );
 
     app.add_plugins(InstancedTextPlugins)
-        .add_plugins(InstancedTextInteractionPlugin::<TextSpan>::default())
+        .add_plugins(InstancedTextInteractionPlugin::<String>::default())
         .add_systems(Startup, (setup_camera, setup_text_view))
         .run();
 }
@@ -197,7 +197,7 @@ fn setup_text_view(
     let line_styles = LineStyles::new(by_line);
 
     commands.spawn((
-        InstancedText::<TextSpan>::new(full_text.clone()),
+        InstancedText::<String>::new(full_text.clone()),
         line_styles,
         TextFont::from_font_size(16.0).with_font(asset_server.load("fonts/FiraMono-Regular.ttf")),
         MonoFontFaces::default().with_bold(asset_server.load("fonts/FiraMono-Medium.ttf")),

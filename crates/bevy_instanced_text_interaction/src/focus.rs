@@ -2,7 +2,7 @@
 //!
 //! All observers are generic over `T: TextContent`, so the same code path
 //! drives click-to-place, drag-select, scroll, and Cmd+C copy for terminals
-//! (`InstancedText<TextSpan>`), labels, and rope-backed editors
+//! (`InstancedText<String>`), labels, and rope-backed editors
 //! (`InstancedText<RopeBuffer>`). Hit-testing uses [`DisplayLayout`] (when
 //! present) for proportional fonts and falls back to monospace cell math.
 //!
@@ -252,7 +252,7 @@ fn block_slice<T: TextContent>(content: &T, start: usize, end: usize) -> String 
 ///
 /// [`InstancedTextInteractionPlugin`]: crate::InstancedTextInteractionPlugin
 /// [`InstancedText<T>`]: bevy_instanced_text::InstancedText
-pub fn on_pointer_scroll<T: TextContent + Component>(
+pub fn on_pointer_scroll<T: TextContent>(
     trigger: On<Pointer<Scroll>>,
     mut views: ScrollQuery<T>,
     keyboard: Res<ButtonInput<KeyCode>>,
@@ -339,7 +339,7 @@ pub fn on_pointer_scroll<T: TextContent + Component>(
 /// Only the primary button starts a selection. Position is taken from the
 /// hit data, which the picking backend reports in viewport-local coords.
 /// Writes through to `SelectionState`/`CursorState` when present.
-pub fn on_pointer_press<T: TextContent + Component>(
+pub fn on_pointer_press<T: TextContent>(
     trigger: On<Pointer<Press>>,
     mut views: PressQuery<T>,
     keyboard: Res<ButtonInput<KeyCode>>,
@@ -491,7 +491,7 @@ impl Default for InteractionSettings {
 /// Picking dispatches `Pointer<Drag>` to the entity that received the
 /// initial press, so this stays scoped to the view that started the drag
 /// even if the cursor moves out of its viewport.
-pub fn on_pointer_drag<T: TextContent + Component>(
+pub fn on_pointer_drag<T: TextContent>(
     trigger: On<Pointer<Drag>>,
     mut views: DragQuery<T>,
 ) {
@@ -590,7 +590,7 @@ pub fn on_pointer_release(
 /// Generic over [`TextContent`] so terminals, labels, and editors all share
 /// this Cmd+C path. Editors with leafwing-driven `CopyRequested` flows can
 /// still run their own handler — both paths are idempotent on the clipboard.
-pub fn on_focused_keyboard<T: TextContent + Component>(
+pub fn on_focused_keyboard<T: TextContent>(
     trigger: On<FocusedInput<KeyboardInput>>,
     views: CopyQuery<T>,
     keyboard: Res<ButtonInput<KeyCode>>,

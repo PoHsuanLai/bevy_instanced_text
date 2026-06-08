@@ -17,8 +17,8 @@ use bevy::prelude::*;
 /// [`InstancedText`]. The engine calls the three required methods during
 /// layout; the four default-implemented methods support hit-testing and
 /// selection by rendering-layer observers. A rope-backed type should
-/// override the defaults for O(log n) indexing — `String` / [`TextSpan`]
-/// fall back to per-line scans, which is fine for short content.
+/// override the defaults for O(log n) indexing — the built-in `String` impl
+/// falls back to per-line scans, which is fine for short content.
 pub trait TextContent: Send + Sync + 'static {
     /// Total number of lines, including a trailing empty line when the
     /// content ends with `\n` (matching ropey's `len_lines()` convention).
@@ -95,10 +95,6 @@ pub trait TextContent: Send + Sync + 'static {
     }
 }
 
-/// Re-export Bevy's [`TextSpan`] so users don't need a separate import.
-/// `TextContent` is implemented for it below.
-pub use bevy::text::TextSpan;
-
 /// Compute `line(i)` for a `&str` body following the ropey convention:
 /// the slice **includes its trailing `\n`** when one is present. The final
 /// virtual empty line after a trailing newline is reported as `""`.
@@ -141,22 +137,6 @@ fn line_count_of(body: &str) -> usize {
     body.as_bytes().iter().filter(|&&b| b == b'\n').count() + 1
 }
 
-impl TextContent for bevy::text::TextSpan {
-    fn line_count(&self) -> usize {
-        line_count_of(&self.0)
-    }
-
-    fn line(&self, i: usize) -> Cow<'_, str> {
-        Cow::Borrowed(line_slice(&self.0, i))
-    }
-
-    fn line_len_chars(&self, i: usize) -> usize {
-        let l = line_slice(&self.0, i);
-        let stripped = l.strip_suffix('\n').unwrap_or(l);
-        stripped.chars().count()
-    }
-}
-
 impl TextContent for String {
     fn line_count(&self) -> usize {
         line_count_of(self)
@@ -174,8 +154,9 @@ impl TextContent for String {
 }
 
 /// The engine's text-view component — the instanced-text analog of Bevy UI's
-/// [`bevy::ui::widget::Text`]. Wraps any [`TextContent`] type: ship
-/// [`TextSpan`] for labels, plug in a rope for editors, a grid for terminals.
+/// [`bevy::ui::widget::Text`]. Wraps any [`TextContent`] type: use `String`
+/// for labels (implemented below), plug in a rope for editors, a grid for
+/// terminals.
 ///
 /// Spawning this component (with a registered `TextContentPlugin<T>`) is
 /// sufficient to get instanced rendering — `TextFont`, `TextColor`, and
@@ -183,11 +164,12 @@ impl TextContent for String {
 /// handled by Bevy's standard `Changed<InstancedText<T>>` — mutations go
 /// through [`DerefMut`] which marks the component changed automatically.
 ///
-/// # Examples
+/// The content type is named explicitly via the turbofish, so the backing
+/// store is visible at every spawn site:
 ///
 /// ```rust,ignore
-/// // Label — `From<&str>` means no turbofish for the TextSpan case.
-/// commands.spawn(InstancedText::from("Track 1"));
+/// // Label — string-backed.
+/// commands.spawn(InstancedText::<String>::new("Track 1"));
 ///
 /// // Editor — rope-backed, impl TextContent for Rope in your crate.
 /// commands.spawn(InstancedText::<RopeBuffer>::new(my_rope));
@@ -196,13 +178,12 @@ impl TextContent for String {
 pub struct InstancedText<T: TextContent>(pub T);
 
 impl<T: TextContent> InstancedText<T> {
-    /// Construct from anything that can convert into the content type `T`.
-    ///
-    /// When `T` isn't obvious from the argument, use a turbofish:
+    /// Construct from anything that converts into the content type `T`. Name
+    /// `T` with a turbofish so the backing store is explicit:
     ///
     /// ```rust,ignore
-    /// // Label: TextSpan: From<&str>, so &str is enough once T is named.
-    /// commands.spawn(InstancedText::<TextSpan>::new("hello"));
+    /// // String: From<&str>, so &str is enough once T is named.
+    /// commands.spawn(InstancedText::<String>::new("hello"));
     ///
     /// // Editor: pass the rope value directly.
     /// commands.spawn(InstancedText::<RopeBuffer>::new(my_rope));
@@ -234,20 +215,6 @@ impl<T: TextContent + Default> Default for InstancedText<T> {
 impl<T: TextContent> From<T> for InstancedText<T> {
     fn from(content: T) -> Self {
         Self(content)
-    }
-}
-
-/// `&str` → `InstancedText<TextSpan>` so the simple-label case spawns as
-/// `InstancedText::from("hello")` without naming the content type.
-impl From<&str> for InstancedText<TextSpan> {
-    fn from(s: &str) -> Self {
-        Self(TextSpan::from(s))
-    }
-}
-
-impl From<String> for InstancedText<TextSpan> {
-    fn from(s: String) -> Self {
-        Self(TextSpan::from(s))
     }
 }
 

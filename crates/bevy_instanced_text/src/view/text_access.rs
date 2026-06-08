@@ -89,7 +89,7 @@ pub fn visible_buffer_range(
 /// `QueryData` so the system signature stays legible.
 #[derive(bevy::ecs::query::QueryData)]
 #[query_data(mutable)]
-pub struct LayoutRow<T: TextContent + Component> {
+pub struct LayoutRow<T: TextContent> {
     buffer: &'static InstancedText<T>,
     scroll: &'static ScrollPosition,
     metrics: &'static mut ContentMetrics,
@@ -127,7 +127,7 @@ type LayoutChanged<T> = Or<(
 /// nothing changed, and otherwise rebuilds the entity's `DisplayLayout`.
 /// Reads `Option<&HiddenLines>` and `Option<&LineStyles>` for editor-domain
 /// folding / styling.
-pub fn produce_layouts<T: TextContent + Component>(
+pub fn produce_layouts<T: TextContent>(
     mut q: Query<LayoutRow<T>, LayoutChanged<T>>,
     mut atlas: ResMut<GlyphAtlas>,
     fonts: Res<Assets<bevy::text::Font>>,
@@ -754,7 +754,7 @@ mod tests {
 
         let entity = world
             .spawn((
-                InstancedText::<crate::view::text::TextSpan>::new(
+                InstancedText::<String>::new(
                     "hello world\nsecond line\nthird line\n",
                 ),
                 bevy::ui::ScrollPosition::default(),
@@ -771,7 +771,7 @@ mod tests {
             .id();
 
         world
-            .run_system_once(produce_layouts::<crate::view::text::TextSpan>)
+            .run_system_once(produce_layouts::<String>)
             .unwrap();
         let lines1 = world.get::<DisplayLayout>(entity).unwrap().lines.len();
         assert_eq!(lines1, 4, "initial layout: 4 rows");
@@ -779,13 +779,13 @@ mod tests {
         // Mimic the edit: replace buffer contents via DerefMut.
         {
             let mut buf = world
-                .get_mut::<InstancedText<crate::view::text::TextSpan>>(entity)
+                .get_mut::<InstancedText<String>>(entity)
                 .unwrap();
-            buf.0 = crate::view::text::TextSpan::new("hello\n world\nsecond line\nthird line\n");
+            buf.0 = String::from("hello\n world\nsecond line\nthird line\n");
         }
 
         world
-            .run_system_once(produce_layouts::<crate::view::text::TextSpan>)
+            .run_system_once(produce_layouts::<String>)
             .unwrap();
         let layout2 = world.get::<DisplayLayout>(entity).unwrap();
         assert_eq!(

@@ -91,15 +91,15 @@ pub struct TextViewBatchEntity(pub Entity);
 /// automatically adds `TextContentPlugin::<String>` for the simple label
 /// use case. Editor / terminal hosts add their own (e.g.
 /// `TextContentPlugin::<Rope>`).
-pub struct TextContentPlugin<T: TextContent + Component>(PhantomData<T>);
+pub struct TextContentPlugin<T: TextContent>(PhantomData<T>);
 
-impl<T: TextContent + Component> Default for TextContentPlugin<T> {
+impl<T: TextContent> Default for TextContentPlugin<T> {
     fn default() -> Self {
         Self(PhantomData)
     }
 }
 
-impl<T: TextContent + Component> Plugin for TextContentPlugin<T> {
+impl<T: TextContent> Plugin for TextContentPlugin<T> {
     fn build(&self, app: &mut App) {
         // Register required components so spawning InstancedText<T> alone is enough.
         app.world_mut()
@@ -168,7 +168,7 @@ impl<T: TextContent + Component> Plugin for TextContentPlugin<T> {
 /// knows their intrinsic line height and width. Runs in `UiSystems::Content`,
 /// before taffy lays out the tree. Only updates when an input that affects the
 /// measured size changes so layout invalidation stays minimal.
-fn measure_text_buffer<T: TextContent + Component>(
+fn measure_text_buffer<T: TextContent>(
     mut q: Query<
         (
             &mut ContentSize,
@@ -222,9 +222,9 @@ impl Plugin for InstancedTextPlugin {
             .register_type::<TextOverlays>()
             .register_type::<ContentMetrics>();
 
-        app.register_type::<super::text::TextSpan>();
-        // Register the TextSpan content type so simple labels work out of the box.
-        app.add_plugins(TextContentPlugin::<super::text::TextSpan>::default());
+        // Register the String content type so simple labels work out of the box.
+        // (Bevy already registers String's reflection.)
+        app.add_plugins(TextContentPlugin::<String>::default());
 
         // Ensure there is always a camera marked as the default UI camera so
         // Bevy UI layout can resolve Val::Percent sizes for InstancedText<T> Node entities.

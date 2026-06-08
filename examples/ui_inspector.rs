@@ -4,7 +4,7 @@
 //!
 //! A three-panel UI: a sidebar listing scene objects, a main properties panel
 //! showing key/value rows for the selected object, and a log panel at the bottom.
-//! All text panels use `InstancedText<TextSpan>` inside standard Bevy UI `Node`
+//! All text panels use `InstancedText<String>` inside standard Bevy UI `Node`
 //! containers — no editor plugin, no cursor, no input handling from bevscode.
 //!
 //! Run with:
@@ -12,7 +12,7 @@
 //!
 //! ## What this exercises
 //!
-//! - Multiple `InstancedText<TextSpan>` views in a Bevy UI flex layout
+//! - Multiple `InstancedText<String>` views in a Bevy UI flex layout
 //! - `LineStyles` for per-row coloring (key column vs value column)
 //! - `TextOverlays` / `TextUnderlays` for hover highlight and selection band
 //! - Per-panel mouse-wheel scrolling via `InstancedTextInteractionPlugin`
@@ -35,9 +35,9 @@ fn main() {
             ..default()
         }))
         .add_plugins(InstancedTextPlugins)
-        // Routes Pointer<Scroll> to the hovered InstancedText<TextSpan> entity,
+        // Routes Pointer<Scroll> to the hovered InstancedText<String> entity,
         // so per-panel mouse-wheel scrolling works without any custom system.
-        .add_plugins(InstancedTextInteractionPlugin::<TextSpan>::default())
+        .add_plugins(InstancedTextInteractionPlugin::<String>::default())
         .init_resource::<InspectorState>()
         .add_systems(Startup, setup_camera)
         .add_systems(Startup, setup_ui.after(setup_camera))
@@ -197,7 +197,7 @@ fn setup_ui(
 
                 sidebar
                     .spawn((
-                        InstancedText::<TextSpan>::new(sidebar_text),
+                        InstancedText::<String>::new(sidebar_text),
                         sidebar_styles,
                         sidebar_underlays,
                         TextFont::from_font_size(font_size).with_font(font.clone()),
@@ -243,7 +243,7 @@ fn setup_ui(
                 let props_styles = build_props_styles(&OBJECTS[0]);
 
                 right.spawn((
-                    InstancedText::<TextSpan>::new(props_text),
+                    InstancedText::<String>::new(props_text),
                     props_styles,
                     TextFont::from_font_size(font_size).with_font(font.clone()),
                     TextColor(Color::srgb(0.82, 0.82, 0.82)),
@@ -273,7 +273,7 @@ fn setup_ui(
 
                 // Log text view
                 right.spawn((
-                    InstancedText::<TextSpan>::new(
+                    InstancedText::<String>::new(
                         "[00:00:00] Inspector started\n[00:00:00] Scene loaded: 5 objects",
                     ),
                     LineStyles::default(),
@@ -429,14 +429,14 @@ fn rebuild_properties_on_selection(
     mut state: ResMut<InspectorState>,
     mut sidebar_q: Query<
         (
-            &mut InstancedText<TextSpan>,
+            &mut InstancedText<String>,
             &mut LineStyles,
             &mut TextUnderlays,
         ),
         (With<SidebarPanel>, Without<PropertiesPanel>),
     >,
     mut props_q: Query<
-        (&mut InstancedText<TextSpan>, &mut LineStyles),
+        (&mut InstancedText<String>, &mut LineStyles),
         (With<PropertiesPanel>, Without<SidebarPanel>),
     >,
 ) {
@@ -450,7 +450,7 @@ fn rebuild_properties_on_selection(
     if let Ok((mut buf, mut styles, mut underlays)) = sidebar_q.single_mut() {
         let text = build_sidebar_text(selected);
         let new_styles = build_sidebar_styles(&text, selected);
-        buf.0 = TextSpan::new(text.clone());
+        buf.0 = text.clone();
         *styles = new_styles;
         *underlays = build_sidebar_underlays(selected);
     }
@@ -460,7 +460,7 @@ fn rebuild_properties_on_selection(
         let obj = &OBJECTS[selected];
         let text = build_props_text(obj);
         let new_styles = build_props_styles(obj);
-        buf.0 = TextSpan::new(text);
+        buf.0 = text;
         *styles = new_styles;
     }
 }
@@ -471,7 +471,7 @@ fn tick_log_panel(
     time: Res<Time>,
     mut log_q: Query<
         (
-            &mut InstancedText<TextSpan>,
+            &mut InstancedText<String>,
             &mut bevy::ui::ScrollPosition,
             &DisplayLayout,
             &ComputedNode,
@@ -500,7 +500,7 @@ fn tick_log_panel(
     state.log_lines.push(msg);
 
     if let Ok((mut buf, mut scroll, layout, computed)) = log_q.single_mut() {
-        buf.0 = TextSpan::new(state.log_lines.join("\n"));
+        buf.0 = state.log_lines.join("\n");
         // Scroll to bottom — pin the last row to the viewport bottom.
         let viewport_h = computed.size().y * computed.inverse_scale_factor();
         scroll.y = layout.scroll_to_bottom_target(viewport_h);
