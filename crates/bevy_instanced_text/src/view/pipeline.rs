@@ -57,7 +57,7 @@ impl DisplayLayout {
 
     /// Total height of the document in logical pixels — equivalent to
     /// `total_display_rows * line_height`. Use this to size an external
-    /// scroll UI, or as the upper clamp for [`scroll_to_bottom_target`].
+    /// scroll UI, or as the upper clamp for `scroll_to_bottom_target`.
     pub fn total_content_height(&self) -> f32 {
         self.total_display_rows as f32 * self.line_height
     }

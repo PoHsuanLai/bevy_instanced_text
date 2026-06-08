@@ -216,7 +216,7 @@ impl PluginGroup for InstancedTextPlugins {
 }
 
 /// The per-text-view columns `update_text_views` reads. Bundled into a
-/// [`QueryData`] so the system signature stays legible.
+/// `QueryData` so the system signature stays legible.
 #[derive(bevy::ecs::query::QueryData)]
 pub struct TextViewRow {
     entity: Entity,

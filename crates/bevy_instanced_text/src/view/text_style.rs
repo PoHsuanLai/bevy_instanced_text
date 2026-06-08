@@ -33,7 +33,7 @@ impl HiddenLines {
 ///
 /// Producers (e.g. the editor's syntax-styling system) compute styled runs
 /// for the visible buffer-line window via the shared
-/// [`super::layout_builder::visible_buffer_range`] helper, build a fresh
+/// [`super::text_access::visible_buffer_range`] helper, build a fresh
 /// `HashMap`, and write a new `LineStyles` Component.
 ///
 /// **Single-writer rule**: at most one system per entity should write

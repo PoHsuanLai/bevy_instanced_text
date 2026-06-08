@@ -1,13 +1,13 @@
 //! Row-anchor positioning helpers in node-local logical pixels (top-left
 //! origin, +Y down) — the same space `Node::top`/`Node::left` consume.
 //!
-//! Prefer pushing a [`RectOverlay`] into [`TextViewOverlays`] for
+//! Prefer pushing a [`RectOverlay`] into [`TextOverlays`] for
 //! row-aligned decorations (selections, highlight bars, indent guides);
 //! reach for these helpers only when you need to position a sibling UI
 //! [`Node`](bevy::ui::Node) child relative to a glyph cell.
 //!
 //! [`RectOverlay`]: super::overlay::RectOverlay
-//! [`TextViewOverlays`]: super::overlay::TextViewOverlays
+//! [`TextOverlays`]: super::overlay::TextOverlays
 //!
 //! # Example
 //! ```no_run

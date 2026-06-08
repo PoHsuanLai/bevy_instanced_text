@@ -142,7 +142,7 @@ pub struct GlyphBatchComponent {
 /// Per-batch affine + clip + UI camera routing for one `TextView`.
 ///
 /// The affine maps node-local logical px → screen physical px and is
-/// composed each frame in [`update_text_views`]. `clip` mirrors Bevy UI's
+/// composed each frame in `update_text_views`. `clip` mirrors Bevy UI's
 /// `CalculatedClip`. `stack_index` and `target_camera` mirror
 /// `ComputedNode::stack_index` / `ComputedUiTargetCamera` on the
 /// `TextView`.

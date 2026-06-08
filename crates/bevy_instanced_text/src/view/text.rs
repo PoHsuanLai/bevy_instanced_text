@@ -1,4 +1,4 @@
-//! TextContent trait, generic TextBuffer<T>, and content metrics.
+//! `TextContent` trait, generic `TextBuffer<T>`, and content metrics.
 //!
 //! Scroll state is `bevy::ui::ScrollPosition` — read it directly from the
 //! same entity. The engine performs no animation; hosts that want smooth
@@ -175,7 +175,7 @@ impl TextContent for String {
 
 /// The engine's text content component. Wraps any [`TextContent`] type.
 ///
-/// Spawning this component (with a registered [`TextContentPlugin<T>`])
+/// Spawning this component (with a registered `TextContentPlugin<T>`)
 /// is sufficient to get instanced text rendering. Change detection is
 /// handled by Bevy's standard `Changed<TextBuffer<T>>` — mutations go
 /// through [`DerefMut`] which marks the component changed automatically.

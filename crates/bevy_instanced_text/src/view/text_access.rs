@@ -86,7 +86,7 @@ pub fn visible_buffer_range(
 }
 
 /// The per-entity columns `produce_layouts` reads/writes. Bundled into a
-/// [`QueryData`] so the system signature stays legible.
+/// `QueryData` so the system signature stays legible.
 #[derive(bevy::ecs::query::QueryData)]
 #[query_data(mutable)]
 pub struct LayoutRow<T: TextContent + Component> {
@@ -119,7 +119,7 @@ type LayoutChanged<T> = Or<(
     Changed<bevy::text::TextColor>,
 )>;
 
-/// The engine's layout system. Registered by [`TextContentPlugin<T>`].
+/// The engine's layout system. Registered by `TextContentPlugin<T>`.
 ///
 /// Walks every `TextBuffer<T>` entity, fingerprints its inputs, skips when
 /// nothing changed, and otherwise rebuilds the entity's `DisplayLayout`.
