@@ -85,86 +85,77 @@ pub fn visible_buffer_range(
     start..end
 }
 
+/// The per-entity columns `produce_layouts` reads/writes. Bundled into a
+/// [`QueryData`] so the system signature stays legible.
+#[derive(bevy::ecs::query::QueryData)]
+#[query_data(mutable)]
+pub struct LayoutRow<T: TextContent + Component> {
+    buffer: &'static TextBuffer<T>,
+    scroll: &'static ScrollPosition,
+    metrics: &'static mut ContentMetrics,
+    viewport: &'static ComputedNode,
+    font: &'static TextFont,
+    line_height: &'static bevy::text::LineHeight,
+    mono: &'static MonoCellWidth,
+    layout: &'static mut DisplayLayout,
+    hidden: Option<&'static HiddenLines>,
+    styles: Option<&'static LineStyles>,
+    wrap: Option<&'static TextBounds>,
+    tuning: Option<&'static super::measurement::LayoutTuning>,
+    text_color: &'static bevy::text::TextColor,
+}
+
+/// Change filter for [`produce_layouts`] — rebuild when any layout input moves.
+type LayoutChanged<T> = Or<(
+    Changed<TextBuffer<T>>,
+    Changed<ScrollPosition>,
+    Changed<ComputedNode>,
+    Changed<TextFont>,
+    Changed<bevy::text::LineHeight>,
+    Changed<MonoCellWidth>,
+    Changed<HiddenLines>,
+    Changed<LineStyles>,
+    Changed<TextBounds>,
+    Changed<bevy::text::TextColor>,
+)>;
+
 /// The engine's layout system. Registered by [`TextContentPlugin<T>`].
 ///
 /// Walks every `TextBuffer<T>` entity, fingerprints its inputs, skips when
 /// nothing changed, and otherwise rebuilds the entity's `DisplayLayout`.
 /// Reads `Option<&HiddenLines>` and `Option<&LineStyles>` for editor-domain
 /// folding / styling.
-#[allow(clippy::type_complexity)]
 pub fn produce_layouts<T: TextContent + Component>(
-    mut q: Query<
-        (
-            &TextBuffer<T>,
-            &ScrollPosition,
-            &mut ContentMetrics,
-            &ComputedNode,
-            &TextFont,
-            &bevy::text::LineHeight,
-            &MonoCellWidth,
-            &mut DisplayLayout,
-            Option<&HiddenLines>,
-            Option<&LineStyles>,
-            Option<&TextBounds>,
-            Option<&super::measurement::LayoutTuning>,
-            &bevy::text::TextColor,
-        ),
-        Or<(
-            Changed<TextBuffer<T>>,
-            Changed<ScrollPosition>,
-            Changed<ComputedNode>,
-            Changed<TextFont>,
-            Changed<bevy::text::LineHeight>,
-            Changed<MonoCellWidth>,
-            Changed<HiddenLines>,
-            Changed<LineStyles>,
-            Changed<TextBounds>,
-            Changed<bevy::text::TextColor>,
-        )>,
-    >,
+    mut q: Query<LayoutRow<T>, LayoutChanged<T>>,
     mut atlas: ResMut<GlyphAtlas>,
     fonts: Res<Assets<bevy::text::Font>>,
 ) {
     let _span = bevy::prelude::info_span!("produce_layouts").entered();
-    for (
-        buffer,
-        scroll,
-        mut metrics,
-        tv_viewport,
-        font,
-        lh,
-        mono,
-        mut layout,
-        hidden,
-        styles,
-        wrap,
-        tuning,
-        text_color,
-    ) in q.iter_mut()
-    {
-        let buffer_lines = tuning
+    for mut row in q.iter_mut() {
+        let buffer_lines = row
+            .tuning
             .map(|t| t.viewport_buffer_lines)
             .unwrap_or(VIEWPORT_BUFFER_LINES);
-        let wrap = wrap.copied().unwrap_or_default();
-        let line_height = crate::view::font::resolve_line_height(*lh, font.font_size);
+        let wrap = row.wrap.copied().unwrap_or_default();
+        let line_height = crate::view::font::resolve_line_height(*row.line_height, row.font.font_size);
         let new_layout = build_display_layout(
-            &**buffer,
-            scroll.y,
-            scroll.x,
-            &mut metrics,
-            tv_viewport,
-            font,
+            &**row.buffer,
+            row.scroll.y,
+            row.scroll.x,
+            &mut row.metrics,
+            row.viewport,
+            row.font,
             line_height,
-            mono,
+            row.mono,
             wrap,
-            text_color.0,
-            hidden,
-            styles,
+            row.text_color.0,
+            row.hidden,
+            row.styles,
             Some(&mut atlas),
             Some(&fonts),
             buffer_lines,
         );
-        *layout = new_layout;
+        *row.layout = new_layout;
     }
 }
 

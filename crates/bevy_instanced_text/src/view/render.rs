@@ -310,9 +310,11 @@ pub fn render_layout(
                         start_x: 0.0,
                     },
                     atlas,
-                    faces.regular,
-                    false,
-                    false,
+                    RunFace {
+                        id: faces.regular,
+                        bold: false,
+                        italic: false,
+                    },
                     &mut text_instances,
                 );
             }
@@ -328,10 +330,14 @@ pub fn render_layout(
                 let bold = run_is_bold(run);
                 let italic = run.italic;
                 let (synth_bold, synth_italic) = faces.needs_synth(bold, italic);
-                let run_face = if let Some(ref handle) = run.font {
-                    atlas.ensure_font(handle, fonts)
-                } else {
-                    faces.pick(bold, italic)
+                let face = RunFace {
+                    id: if let Some(ref handle) = run.font {
+                        atlas.ensure_font(handle, fonts)
+                    } else {
+                        faces.pick(bold, italic)
+                    },
+                    bold,
+                    italic,
                 };
 
                 // Synthesis: if no italic face is loaded, use the run's
@@ -376,9 +382,7 @@ pub fn render_layout(
                             baseline_offset,
                             bg,
                             atlas,
-                            run_face,
-                            bold,
-                            italic,
+                            face,
                             shape_usable,
                             &mut below_instances,
                             &mut text_instances,
@@ -392,9 +396,7 @@ pub fn render_layout(
                             seg_x_start,
                             seg_font_size,
                             atlas,
-                            run_face,
-                            bold,
-                            italic,
+                            face,
                             shape_usable,
                             &mut text_instances,
                         );
@@ -408,9 +410,7 @@ pub fn render_layout(
                         seg_x_start,
                         seg_font_size,
                         atlas,
-                        run_face,
-                        bold,
-                        italic,
+                        face,
                         shape_usable,
                         &mut text_instances,
                     );
@@ -552,6 +552,18 @@ struct RunMetrics {
     start_x: f32,
 }
 
+/// The resolved font face for a run plus the synthesis flags the shaper needs.
+/// These three always travel together — the face is picked from `bold`/`italic`
+/// (or the run's explicit font), and the shaper re-applies the flags to select
+/// the matching style within that face. Bundled so the emit functions take one
+/// argument instead of three.
+#[derive(Clone, Copy)]
+struct RunFace {
+    id: Option<cosmic_text::fontdb::ID>,
+    bold: bool,
+    italic: bool,
+}
+
 /// Emit glyphs for a byte range by shaping it on demand. Used when no
 /// `LineShape` is attached (`trivial_layout` consumers) or when a
 /// `TextFormat.font_scale` override requires re-shaping at a different size.
@@ -559,7 +571,6 @@ struct RunMetrics {
 /// Shaping a per-frame slice is cheap — it's the same code path the producer
 /// uses, just narrowed to the run. For monospace ASCII it yields advances
 /// byte-identical to the old `col * char_width` walk.
-#[allow(clippy::too_many_arguments)]
 fn emit_unshaped_run_glyphs(
     line: &ShapedLine,
     range: std::ops::Range<usize>,
@@ -567,16 +578,14 @@ fn emit_unshaped_run_glyphs(
     style: RunStyle,
     metrics: RunMetrics,
     atlas: &mut GlyphAtlas,
-    font_id: Option<cosmic_text::fontdb::ID>,
-    bold: bool,
-    italic: bool,
+    face: RunFace,
     out: &mut Vec<GlyphInstance>,
 ) {
     let Some(slice) = line.text.get(range) else {
         return;
     };
     let shape_text = slice.strip_suffix('\n').unwrap_or(slice);
-    let shape = atlas.shape_line_styled(shape_text, metrics.font_size, font_id, bold, italic);
+    let shape = atlas.shape_line_styled(shape_text, metrics.font_size, face.id, face.bold, face.italic);
     for g in &shape.glyphs {
         let Some((info, _)) = atlas.get_or_rasterize_glyph(g.cache_key) else {
             continue;
@@ -602,9 +611,7 @@ fn emit_run_with_bg(
     baseline_offset: f32,
     bg: bevy::prelude::Color,
     atlas: &mut GlyphAtlas,
-    run_face: Option<cosmic_text::fontdb::ID>,
-    bold: bool,
-    italic: bool,
+    face: RunFace,
     shape_usable: Option<&Arc<super::glyph::LineShape>>,
     below: &mut Vec<GlyphInstance>,
     text: &mut Vec<GlyphInstance>,
@@ -638,9 +645,7 @@ fn emit_run_with_bg(
         seg_x_start,
         seg_font_size,
         atlas,
-        run_face,
-        bold,
-        italic,
+        face,
         shape_usable,
         text,
     );
@@ -656,9 +661,7 @@ fn emit_run_glyphs_only(
     seg_x_start: f32,
     seg_font_size: f32,
     atlas: &mut GlyphAtlas,
-    run_face: Option<cosmic_text::fontdb::ID>,
-    bold: bool,
-    italic: bool,
+    face: RunFace,
     shape_usable: Option<&Arc<super::glyph::LineShape>>,
     out: &mut Vec<GlyphInstance>,
 ) {
@@ -682,9 +685,7 @@ fn emit_run_glyphs_only(
                 start_x: seg_x_start,
             },
             atlas,
-            run_face,
-            bold,
-            italic,
+            face,
             out,
         );
     }

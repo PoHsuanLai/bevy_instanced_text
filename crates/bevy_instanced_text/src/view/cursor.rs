@@ -235,7 +235,6 @@ fn resolve_display_row_and_x(
 }
 
 #[cfg(test)]
-#[allow(clippy::field_reassign_with_default)]
 mod tests {
     use super::*;
     use crate::view::font::MonoCellWidth;
@@ -246,11 +245,15 @@ mod tests {
     use bevy::ui::ScrollPosition;
 
     fn make_computed() -> bevy::ui::ComputedNode {
-        let mut c = bevy::ui::ComputedNode::default();
-        c.size = Vec2::new(800.0, 600.0);
-        c.inverse_scale_factor = 1.0;
-        c.padding.min_inset = Vec2::new(50.0, 8.0);
-        c
+        bevy::ui::ComputedNode {
+            size: Vec2::new(800.0, 600.0),
+            inverse_scale_factor: 1.0,
+            padding: bevy::sprite::BorderRect {
+                min_inset: Vec2::new(50.0, 8.0),
+                ..default()
+            },
+            ..default()
+        }
     }
 
     fn make_editor_world() -> (World, Entity) {

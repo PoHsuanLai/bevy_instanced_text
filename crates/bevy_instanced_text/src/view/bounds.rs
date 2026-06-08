@@ -287,40 +287,46 @@ impl RowMetrics {
 ///
 /// `DisplayLayout` is optional — without it, falls back to the canonical
 /// baseline ratio.
-#[derive(bevy::ecs::system::SystemParam)]
-pub struct RowMetricsParam<'w, 's> {
-    #[allow(clippy::type_complexity)]
-    query: bevy::ecs::system::Query<
-        'w,
-        's,
-        (
-            bevy::ecs::entity::Entity,
-            &'static bevy::ui::ComputedNode,
-            &'static ScrollPosition,
-            &'static TextFont,
-            &'static bevy::text::LineHeight,
-            &'static MonoCellWidth,
-            Option<&'static super::pipeline::DisplayLayout>,
-        ),
-    >,
+/// The per-text-view columns [`RowMetricsParam`] reads to build a [`RowMetrics`].
+#[derive(bevy::ecs::query::QueryData)]
+pub struct RowMetricsRow {
+    entity: bevy::ecs::entity::Entity,
+    computed: &'static bevy::ui::ComputedNode,
+    scroll: &'static ScrollPosition,
+    font: &'static TextFont,
+    line_height: &'static bevy::text::LineHeight,
+    mono: &'static MonoCellWidth,
+    layout: Option<&'static super::pipeline::DisplayLayout>,
 }
 
-impl<'w, 's> RowMetricsParam<'w, 's> {
+impl RowMetricsRowItem<'_, '_> {
+    /// Resolve this row's columns into a [`RowMetrics`].
+    fn metrics(&self) -> RowMetrics {
+        let line_height = crate::view::font::resolve_line_height(*self.line_height, self.font.font_size);
+        let baseline = self
+            .layout
+            .map(|l| l.baseline_offset)
+            .unwrap_or(self.font.font_size * DEFAULT_BASELINE_OFFSET_RATIO);
+        row_metrics_with_baseline(
+            self.computed,
+            self.scroll.y,
+            self.scroll.x,
+            line_height,
+            self.mono,
+            baseline,
+        )
+    }
+}
+
+#[derive(bevy::ecs::system::SystemParam)]
+pub struct RowMetricsParam<'w, 's> {
+    query: bevy::ecs::system::Query<'w, 's, RowMetricsRow>,
+}
+
+impl RowMetricsParam<'_, '_> {
     /// `RowMetrics` for `entity`, or `None` if a required component is missing.
     pub fn get(&self, entity: bevy::ecs::entity::Entity) -> Option<RowMetrics> {
-        let (_, computed, scroll, font, lh, mono, layout) = self.query.get(entity).ok()?;
-        let line_height = crate::view::font::resolve_line_height(*lh, font.font_size);
-        let baseline = layout
-            .map(|l| l.baseline_offset)
-            .unwrap_or(font.font_size * DEFAULT_BASELINE_OFFSET_RATIO);
-        Some(row_metrics_with_baseline(
-            computed,
-            scroll.y,
-            scroll.x,
-            line_height,
-            mono,
-            baseline,
-        ))
+        Some(self.query.get(entity).ok()?.metrics())
     }
 
     /// [`get`](Self::get) that panics on missing components.
@@ -336,30 +342,11 @@ impl<'w, 's> RowMetricsParam<'w, 's> {
 
     /// `(entity, RowMetrics)` for every text view in the world.
     pub fn iter(&self) -> impl Iterator<Item = (bevy::ecs::entity::Entity, RowMetrics)> + '_ {
-        self.query
-            .iter()
-            .map(|(entity, computed, scroll, font, lh, mono, layout)| {
-                let line_height = crate::view::font::resolve_line_height(*lh, font.font_size);
-                let baseline = layout
-                    .map(|l| l.baseline_offset)
-                    .unwrap_or(font.font_size * DEFAULT_BASELINE_OFFSET_RATIO);
-                (
-                    entity,
-                    row_metrics_with_baseline(
-                        computed,
-                        scroll.y,
-                        scroll.x,
-                        line_height,
-                        mono,
-                        baseline,
-                    ),
-                )
-            })
+        self.query.iter().map(|row| (row.entity, row.metrics()))
     }
 }
 
 #[cfg(test)]
-#[allow(clippy::field_reassign_with_default)]
 mod tests {
     use super::*;
     use crate::view::overlay::{CornerRadii, RectOverlay, RowVertical};
@@ -367,10 +354,15 @@ mod tests {
     fn make_metrics() -> RowMetrics {
         // 800x600 logical at 1x DPI; padding.left=50, padding.top=8.
         // scroll_y=100.0 is equivalent to the old scroll_offset=-100.0.
-        let mut computed = bevy::ui::ComputedNode::default();
-        computed.size = bevy::math::Vec2::new(800.0, 600.0);
-        computed.inverse_scale_factor = 1.0;
-        computed.padding.min_inset = bevy::math::Vec2::new(50.0, 8.0);
+        let computed = bevy::ui::ComputedNode {
+            size: bevy::math::Vec2::new(800.0, 600.0),
+            inverse_scale_factor: 1.0,
+            padding: bevy::sprite::BorderRect {
+                min_inset: bevy::math::Vec2::new(50.0, 8.0),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
         let mono = MonoCellWidth { px: 8.4 };
         row_metrics_with_baseline(&computed, 100.0, 0.0, 21.0, &mono, 14.0 * 0.32)
     }

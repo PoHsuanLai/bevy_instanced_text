@@ -215,52 +215,53 @@ impl PluginGroup for InstancedTextPlugins {
     }
 }
 
-#[allow(clippy::type_complexity)]
+/// The per-text-view columns `update_text_views` reads. Bundled into a
+/// [`QueryData`] so the system signature stays legible.
+#[derive(bevy::ecs::query::QueryData)]
+pub struct TextViewRow {
+    entity: Entity,
+    scroll: &'static ScrollPosition,
+    computed: &'static ComputedNode,
+    ui_transform: Ref<'static, UiGlobalTransform>,
+    clip: Option<&'static CalculatedClip>,
+    target_cam: Option<&'static ComputedUiTargetCamera>,
+    font: &'static TextFont,
+    faces_cfg: &'static MonoFontFaces,
+    text_layout: Option<&'static bevy::text::TextLayout>,
+    layout: Ref<'static, DisplayLayout>,
+    underlays: Ref<'static, TextUnderlays>,
+    overlays: Ref<'static, TextOverlays>,
+    batch_entity: Option<&'static TextViewBatchEntity>,
+    render_layers: Option<&'static bevy_camera::visibility::RenderLayers>,
+    inherited_vis: Ref<'static, InheritedVisibility>,
+}
+
 pub fn update_text_views(
     mut commands: Commands,
-    mut text_views: Query<
-        (
-            Entity,
-            &ScrollPosition,
-            &ComputedNode,
-            Ref<UiGlobalTransform>,
-            Option<&CalculatedClip>,
-            Option<&ComputedUiTargetCamera>,
-            &TextFont,
-            &MonoFontFaces,
-            Option<&bevy::text::TextLayout>,
-            Ref<DisplayLayout>,
-            Ref<TextUnderlays>,
-            Ref<TextOverlays>,
-            Option<&TextViewBatchEntity>,
-            Option<&bevy_camera::visibility::RenderLayers>,
-            Ref<InheritedVisibility>,
-        ),
-        With<DisplayLayout>,
-    >,
+    mut text_views: Query<TextViewRow, With<DisplayLayout>>,
     mut atlas: ResMut<GlyphAtlas>,
     mut images: ResMut<Assets<Image>>,
     fonts: Res<Assets<bevy::text::Font>>,
 ) {
     let _span = bevy::prelude::info_span!("update_text_views").entered();
-    for (
-        tv_entity,
-        scroll,
-        computed,
-        ui_transform,
-        clip,
-        target_cam,
-        font,
-        faces_cfg,
-        text_layout,
-        layout,
-        underlays,
-        overlays,
-        batch_entity_opt,
-        render_layers,
-        inherited_vis,
-    ) in text_views.iter_mut()
-    {
+    for row in text_views.iter_mut() {
+        let TextViewRowItem {
+            entity: tv_entity,
+            scroll,
+            computed,
+            ui_transform,
+            clip,
+            target_cam,
+            font,
+            faces_cfg,
+            text_layout,
+            layout,
+            underlays,
+            overlays,
+            batch_entity: batch_entity_opt,
+            render_layers,
+            inherited_vis,
+        } = row;
         let justify = text_layout.map(|t| t.justify).unwrap_or_default();
         let regular = atlas.ensure_font(&font.font, &fonts);
         let bold = faces_cfg
