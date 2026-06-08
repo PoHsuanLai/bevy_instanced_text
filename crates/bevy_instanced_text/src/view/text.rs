@@ -1,4 +1,4 @@
-//! `TextContent` trait, generic `TextBuffer<T>`, and content metrics.
+//! `TextContent` trait, generic `InstancedText<T>`, and content metrics.
 //!
 //! Scroll state is `bevy::ui::ScrollPosition` — read it directly from the
 //! same entity. The engine performs no animation; hosts that want smooth
@@ -14,7 +14,7 @@ use bevy::prelude::*;
 /// text buffer.
 ///
 /// Implement this on any type to use it as the backing store for a
-/// [`TextBuffer`]. The engine calls the three required methods during
+/// [`InstancedText`]. The engine calls the three required methods during
 /// layout; the four default-implemented methods support hit-testing and
 /// selection by rendering-layer observers. A rope-backed type should
 /// override the defaults for O(log n) indexing — `String` / [`TextSpan`]
@@ -173,90 +173,83 @@ impl TextContent for String {
     }
 }
 
-/// The engine's text content component. Wraps any [`TextContent`] type.
+/// The engine's text-view component — the instanced-text analog of Bevy UI's
+/// [`bevy::ui::widget::Text`]. Wraps any [`TextContent`] type: ship
+/// [`TextSpan`] for labels, plug in a rope for editors, a grid for terminals.
 ///
-/// Spawning this component (with a registered `TextContentPlugin<T>`)
-/// is sufficient to get instanced text rendering. Change detection is
-/// handled by Bevy's standard `Changed<TextBuffer<T>>` — mutations go
+/// Spawning this component (with a registered `TextContentPlugin<T>`) is
+/// sufficient to get instanced rendering — `TextFont`, `TextColor`, and
+/// `TextLayout` are auto-inserted like Bevy's `Text`. Change detection is
+/// handled by Bevy's standard `Changed<InstancedText<T>>` — mutations go
 /// through [`DerefMut`] which marks the component changed automatically.
 ///
 /// # Examples
 ///
 /// ```rust,ignore
-/// // Simple label — no rope needed
-/// commands.spawn(TextBuffer::<TextSpan>::new("Track 1"));
+/// // Label — `From<&str>` means no turbofish for the TextSpan case.
+/// commands.spawn(InstancedText::from("Track 1"));
 ///
-/// // Editor — rope-backed, impl TextContent for Rope in your crate
-/// commands.spawn(TextBuffer::<RopeBuffer>::new(my_rope));
+/// // Editor — rope-backed, impl TextContent for Rope in your crate.
+/// commands.spawn(InstancedText::<RopeBuffer>::new(my_rope));
 /// ```
 #[derive(Component)]
-pub struct TextBuffer<T: TextContent>(pub T);
+pub struct InstancedText<T: TextContent>(pub T);
 
-impl<T: TextContent> TextBuffer<T> {
+impl<T: TextContent> InstancedText<T> {
     /// Construct from anything that can convert into the content type `T`.
     ///
     /// When `T` isn't obvious from the argument, use a turbofish:
     ///
     /// ```rust,ignore
     /// // Label: TextSpan: From<&str>, so &str is enough once T is named.
-    /// commands.spawn(TextBuffer::<TextSpan>::new("hello"));
+    /// commands.spawn(InstancedText::<TextSpan>::new("hello"));
     ///
     /// // Editor: pass the rope value directly.
-    /// commands.spawn(TextBuffer::<RopeBuffer>::new(my_rope));
+    /// commands.spawn(InstancedText::<RopeBuffer>::new(my_rope));
     /// ```
     pub fn new(content: impl Into<T>) -> Self {
         Self(content.into())
     }
 }
 
-impl<T: TextContent> Deref for TextBuffer<T> {
+impl<T: TextContent> Deref for InstancedText<T> {
     type Target = T;
     fn deref(&self) -> &T {
         &self.0
     }
 }
 
-impl<T: TextContent> DerefMut for TextBuffer<T> {
+impl<T: TextContent> DerefMut for InstancedText<T> {
     fn deref_mut(&mut self) -> &mut T {
         &mut self.0
     }
 }
 
-impl<T: TextContent + Default> Default for TextBuffer<T> {
+impl<T: TextContent + Default> Default for InstancedText<T> {
     fn default() -> Self {
         Self(T::default())
     }
 }
 
-impl<T: TextContent> From<T> for TextBuffer<T> {
+impl<T: TextContent> From<T> for InstancedText<T> {
     fn from(content: T) -> Self {
         Self(content)
     }
 }
 
-impl From<&str> for TextBuffer<TextSpan> {
+/// `&str` → `InstancedText<TextSpan>` so the simple-label case spawns as
+/// `InstancedText::from("hello")` without naming the content type.
+impl From<&str> for InstancedText<TextSpan> {
     fn from(s: &str) -> Self {
         Self(TextSpan::from(s))
     }
 }
 
-impl From<String> for TextBuffer<TextSpan> {
+impl From<String> for InstancedText<TextSpan> {
     fn from(s: String) -> Self {
         Self(TextSpan::from(s))
     }
 }
-
-/// A simple single-string text view — the instanced-text analog of Bevy UI's
-/// [`bevy::ui::widget::Text`]. Spawn it directly with `&str` / `String`
-/// to skip the `::<TextSpan>` turbofish:
-///
-/// ```rust,ignore
-/// commands.spawn(TextLabel::from("hello"));   // or TextLabel::new("hello")
-/// ```
-///
-/// For rope-backed editors or grid-backed terminals, use [`TextBuffer<T>`]
-/// directly with your own content type.
-pub type TextLabel = TextBuffer<TextSpan>;
 
 /// Recomputable layout cache — widest shaped line, used by external scroll UI to size horizontal extent.
 #[derive(Component, Default, Reflect)]

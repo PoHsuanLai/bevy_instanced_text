@@ -2,8 +2,8 @@
 //!
 //! All observers are generic over `T: TextContent`, so the same code path
 //! drives click-to-place, drag-select, scroll, and Cmd+C copy for terminals
-//! (`TextBuffer<TextSpan>`), labels, and rope-backed editors
-//! (`TextBuffer<RopeBuffer>`). Hit-testing uses [`DisplayLayout`] (when
+//! (`InstancedText<TextSpan>`), labels, and rope-backed editors
+//! (`InstancedText<RopeBuffer>`). Hit-testing uses [`DisplayLayout`] (when
 //! present) for proportional fonts and falls back to monospace cell math.
 //!
 //! The observers write directly into [`SelectionState`] / [`CursorState`].
@@ -21,7 +21,7 @@ use bevy::prelude::*;
 use bevy::ui::ui_transform::UiGlobalTransform;
 
 use bevy::ui::{ComputedNode, ScrollPosition};
-use bevy_instanced_text::{ContentMetrics, DisplayLayout, MonoCellWidth, TextBuffer, TextContent};
+use bevy_instanced_text::{ContentMetrics, DisplayLayout, MonoCellWidth, InstancedText, TextContent};
 
 use crate::interaction_states::{ScrollConfig, TextViewDragState};
 use crate::text_state::{CursorState, SelectionState};
@@ -30,7 +30,7 @@ type ScrollQuery<'w, 's, T> = Query<
     'w,
     's,
     (
-        &'static TextBuffer<T>,
+        &'static InstancedText<T>,
         &'static mut ScrollPosition,
         &'static ContentMetrics,
         &'static ComputedNode,
@@ -47,7 +47,7 @@ type PressQuery<'w, 's, T> = Query<
     's,
     (
         &'static mut TextViewDragState,
-        &'static TextBuffer<T>,
+        &'static InstancedText<T>,
         &'static ScrollPosition,
         &'static TextFont,
         &'static bevy::text::LineHeight,
@@ -66,7 +66,7 @@ type DragQuery<'w, 's, T> = Query<
     's,
     (
         &'static mut TextViewDragState,
-        &'static TextBuffer<T>,
+        &'static InstancedText<T>,
         &'static ScrollPosition,
         &'static TextFont,
         &'static bevy::text::LineHeight,
@@ -81,7 +81,7 @@ type DragQuery<'w, 's, T> = Query<
 >;
 
 type CopyQuery<'w, 's, T> =
-    Query<'w, 's, (&'static SelectionState, &'static TextBuffer<T>), With<DisplayLayout>>;
+    Query<'w, 's, (&'static SelectionState, &'static InstancedText<T>), With<DisplayLayout>>;
 
 /// Convert screen coordinates (viewport-local, 0,0 at top-left) to a character
 /// position in the text. Generic over any [`TextContent`]; uses the trait's
@@ -242,7 +242,7 @@ fn block_slice<T: TextContent>(content: &T, start: usize, end: usize) -> String 
 /// entity is currently under the cursor, so multi-panel layouts get
 /// per-panel scrolling for free — no need to compare mouse position against
 /// each panel's node bounds. Add [`InstancedTextInteractionPlugin`] (which
-/// installs this observer) and every [`TextBuffer<T>`] entity scrolls
+/// installs this observer) and every [`InstancedText<T>`] entity scrolls
 /// independently when hovered.
 ///
 /// Hosts that want different scroll behavior per panel can add their own
@@ -251,7 +251,7 @@ fn block_slice<T: TextContent>(content: &T, start: usize, end: usize) -> String 
 /// [`ScrollPosition`] component.
 ///
 /// [`InstancedTextInteractionPlugin`]: crate::InstancedTextInteractionPlugin
-/// [`TextBuffer<T>`]: bevy_instanced_text::TextBuffer
+/// [`InstancedText<T>`]: bevy_instanced_text::InstancedText
 pub fn on_pointer_scroll<T: TextContent + Component>(
     trigger: On<Pointer<Scroll>>,
     mut views: ScrollQuery<T>,

@@ -1,6 +1,6 @@
 //! Per-view interaction state components.
 //!
-//! These attach to entities carrying a `TextBuffer` when
+//! These attach to entities carrying an `InstancedText` when
 //! mouse + keyboard interactivity is desired. Editors typically attach
 //! them automatically via `#[require]`; plain text views (chat, logs)
 //! omit them when they want to be display-only.

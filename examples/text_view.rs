@@ -197,7 +197,7 @@ fn setup_text_view(
     let line_styles = LineStyles::new(by_line);
 
     commands.spawn((
-        TextBuffer::<TextSpan>::new(full_text.clone()),
+        InstancedText::<TextSpan>::new(full_text.clone()),
         line_styles,
         TextFont::from_font_size(16.0).with_font(asset_server.load("fonts/FiraMono-Regular.ttf")),
         MonoFontFaces::default().with_bold(asset_server.load("fonts/FiraMono-Medium.ttf")),

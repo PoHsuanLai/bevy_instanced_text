@@ -1,5 +1,5 @@
 //! Text view plugin — registers the rendering systems that turn
-//! `TextBuffer<T>` entities into GPU draw batches.
+//! `InstancedText<T>` entities into GPU draw batches.
 //!
 //! [`InstancedTextPlugin`] sets up the core rendering infrastructure.
 //! [`TextContentPlugin<T>`] registers `produce_layouts::<T>` for a specific
@@ -24,7 +24,7 @@ use super::measurement::LayoutTuning;
 use super::overlay::{TextOverlays, TextUnderlays};
 use super::pipeline::DisplayLayout;
 use super::render::{render_layout, BatchTransform, GlyphBatchComponent, TextViewBatch};
-use super::text::{ContentMetrics, TextBuffer, TextContent};
+use super::text::{ContentMetrics, InstancedText, TextContent};
 use super::text_access::{produce_layouts, LayoutProduceSet};
 use super::text_style::TextBounds;
 use crate::gpu::{atlas_ready, GlyphAtlas, GlyphAtlasPlugin, InstancedTextRenderPlugin};
@@ -34,7 +34,7 @@ pub use bevy::text::{TextBackgroundColor, TextColor};
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct TextViewRenderSet;
 
-/// Taffy `Measure` reporting a `TextBuffer`'s intrinsic size so flex
+/// Taffy `Measure` reporting an `InstancedText`'s intrinsic size so flex
 /// containers can size the node without an explicit `Node::width`/`height` —
 /// mirroring how Bevy UI's `Text` measures. `line_height` is the cross-axis
 /// hint; `max_content_width` / `min_content_width` are approximate intrinsic
@@ -45,13 +45,13 @@ pub struct TextViewRenderSet;
 /// explicit `Node::width` always wins; this only contributes when the parent
 /// asks for `MinContent` / `MaxContent`.
 #[derive(Clone, Copy)]
-struct TextBufferMeasure {
+struct InstancedTextMeasure {
     line_height: f32,
     max_content_width: f32,
     min_content_width: f32,
 }
 
-impl Measure for TextBufferMeasure {
+impl Measure for InstancedTextMeasure {
     fn measure(&mut self, args: MeasureArgs<'_>, _style: &taffy::Style) -> bevy::math::Vec2 {
         use bevy::ui::AvailableSpace;
         let width = args.width.unwrap_or_else(|| match args.available_width {
@@ -101,54 +101,54 @@ impl<T: TextContent + Component> Default for TextContentPlugin<T> {
 
 impl<T: TextContent + Component> Plugin for TextContentPlugin<T> {
     fn build(&self, app: &mut App) {
-        // Register required components so spawning TextBuffer<T> alone is enough.
+        // Register required components so spawning InstancedText<T> alone is enough.
         app.world_mut()
-            .register_required_components_with::<TextBuffer<T>, bevy::text::LineHeight>(|| {
+            .register_required_components_with::<InstancedText<T>, bevy::text::LineHeight>(|| {
                 bevy::text::LineHeight::RelativeToFont(1.5)
             });
         app.world_mut()
-            .register_required_components::<TextBuffer<T>, ScrollPosition>();
+            .register_required_components::<InstancedText<T>, ScrollPosition>();
         app.world_mut()
-            .register_required_components::<TextBuffer<T>, ContentMetrics>();
+            .register_required_components::<InstancedText<T>, ContentMetrics>();
         app.world_mut()
-            .register_required_components::<TextBuffer<T>, DisplayLayout>();
+            .register_required_components::<InstancedText<T>, DisplayLayout>();
         app.world_mut()
-            .register_required_components::<TextBuffer<T>, TextUnderlays>();
+            .register_required_components::<InstancedText<T>, TextUnderlays>();
         app.world_mut()
-            .register_required_components::<TextBuffer<T>, TextOverlays>();
+            .register_required_components::<InstancedText<T>, TextOverlays>();
         app.world_mut()
-            .register_required_components::<TextBuffer<T>, TextFont>();
+            .register_required_components::<InstancedText<T>, TextFont>();
         app.world_mut()
-            .register_required_components::<TextBuffer<T>, TextColor>();
+            .register_required_components::<InstancedText<T>, TextColor>();
         app.world_mut()
-            .register_required_components::<TextBuffer<T>, bevy::text::TextLayout>();
+            .register_required_components::<InstancedText<T>, bevy::text::TextLayout>();
         app.world_mut()
-            .register_required_components::<TextBuffer<T>, TextBackgroundColor>();
+            .register_required_components::<InstancedText<T>, TextBackgroundColor>();
         app.world_mut()
-            .register_required_components::<TextBuffer<T>, MonoFontFaces>();
+            .register_required_components::<InstancedText<T>, MonoFontFaces>();
         app.world_mut()
-            .register_required_components::<TextBuffer<T>, MonoCellWidth>();
+            .register_required_components::<InstancedText<T>, MonoCellWidth>();
 
         app.world_mut()
-            .register_required_components::<TextBuffer<T>, TextBounds>();
+            .register_required_components::<InstancedText<T>, TextBounds>();
         app.world_mut()
-            .register_required_components::<TextBuffer<T>, super::text_style::LineStyles>();
+            .register_required_components::<InstancedText<T>, super::text_style::LineStyles>();
         app.world_mut()
-            .register_required_components::<TextBuffer<T>, super::text_style::HiddenLines>();
+            .register_required_components::<InstancedText<T>, super::text_style::HiddenLines>();
         app.world_mut()
-            .register_required_components::<TextBuffer<T>, LayoutTuning>();
+            .register_required_components::<InstancedText<T>, LayoutTuning>();
         app.world_mut()
-            .register_required_components::<TextBuffer<T>, Node>();
+            .register_required_components::<InstancedText<T>, Node>();
         app.world_mut()
-            .register_required_components::<TextBuffer<T>, ContentSize>();
+            .register_required_components::<InstancedText<T>, ContentSize>();
         app.world_mut()
-            .register_required_components::<TextBuffer<T>, Visibility>();
+            .register_required_components::<InstancedText<T>, Visibility>();
         app.world_mut()
-            .register_required_components_with::<TextBuffer<T>, InheritedVisibility>(|| {
+            .register_required_components_with::<InstancedText<T>, InheritedVisibility>(|| {
                 InheritedVisibility::VISIBLE
             });
         app.world_mut()
-            .register_required_components::<TextBuffer<T>, bevy::picking::Pickable>();
+            .register_required_components::<InstancedText<T>, bevy::picking::Pickable>();
 
         app.add_systems(
             PostUpdate,
@@ -164,7 +164,7 @@ impl<T: TextContent + Component> Plugin for TextContentPlugin<T> {
     }
 }
 
-/// Installs a [`TextBufferMeasure`] on every `TextBuffer<T>` entity so bevy_ui
+/// Installs a [`InstancedTextMeasure`] on every `InstancedText<T>` entity so bevy_ui
 /// knows their intrinsic line height and width. Runs in `UiSystems::Content`,
 /// before taffy lays out the tree. Only updates when an input that affects the
 /// measured size changes so layout invalidation stays minimal.
@@ -172,15 +172,15 @@ fn measure_text_buffer<T: TextContent + Component>(
     mut q: Query<
         (
             &mut ContentSize,
-            &TextBuffer<T>,
+            &InstancedText<T>,
             &bevy::text::LineHeight,
             &TextFont,
             &MonoCellWidth,
         ),
         (
-            With<TextBuffer<T>>,
+            With<InstancedText<T>>,
             Or<(
-                Changed<TextBuffer<T>>,
+                Changed<InstancedText<T>>,
                 Changed<bevy::text::LineHeight>,
                 Changed<TextFont>,
                 Changed<MonoCellWidth>,
@@ -192,7 +192,7 @@ fn measure_text_buffer<T: TextContent + Component>(
     for (mut content_size, buffer, line_height, font, mono) in q.iter_mut() {
         let lh = resolve_line_height(*line_height, font.font_size);
         let (max_content_width, min_content_width) = intrinsic_widths(&**buffer, mono.px);
-        content_size.set(NodeMeasure::Custom(Box::new(TextBufferMeasure {
+        content_size.set(NodeMeasure::Custom(Box::new(InstancedTextMeasure {
             line_height: lh,
             max_content_width,
             min_content_width,
@@ -227,7 +227,7 @@ impl Plugin for InstancedTextPlugin {
         app.add_plugins(TextContentPlugin::<super::text::TextSpan>::default());
 
         // Ensure there is always a camera marked as the default UI camera so
-        // Bevy UI layout can resolve Val::Percent sizes for TextBuffer<T> Node entities.
+        // Bevy UI layout can resolve Val::Percent sizes for InstancedText<T> Node entities.
         app.add_systems(Startup, ensure_default_ui_camera);
 
         app.add_systems(

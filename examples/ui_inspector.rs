@@ -4,7 +4,7 @@
 //!
 //! A three-panel UI: a sidebar listing scene objects, a main properties panel
 //! showing key/value rows for the selected object, and a log panel at the bottom.
-//! All text panels use `TextBuffer<TextSpan>` inside standard Bevy UI `Node`
+//! All text panels use `InstancedText<TextSpan>` inside standard Bevy UI `Node`
 //! containers — no editor plugin, no cursor, no input handling from bevscode.
 //!
 //! Run with:
@@ -12,7 +12,7 @@
 //!
 //! ## What this exercises
 //!
-//! - Multiple `TextBuffer<TextSpan>` views in a Bevy UI flex layout
+//! - Multiple `InstancedText<TextSpan>` views in a Bevy UI flex layout
 //! - `LineStyles` for per-row coloring (key column vs value column)
 //! - `TextOverlays` / `TextUnderlays` for hover highlight and selection band
 //! - Per-panel mouse-wheel scrolling via `InstancedTextInteractionPlugin`
@@ -35,7 +35,7 @@ fn main() {
             ..default()
         }))
         .add_plugins(InstancedTextPlugins)
-        // Routes Pointer<Scroll> to the hovered TextBuffer<TextSpan> entity,
+        // Routes Pointer<Scroll> to the hovered InstancedText<TextSpan> entity,
         // so per-panel mouse-wheel scrolling works without any custom system.
         .add_plugins(InstancedTextInteractionPlugin::<TextSpan>::default())
         .init_resource::<InspectorState>()
@@ -197,7 +197,7 @@ fn setup_ui(
 
                 sidebar
                     .spawn((
-                        TextBuffer::<TextSpan>::new(sidebar_text),
+                        InstancedText::<TextSpan>::new(sidebar_text),
                         sidebar_styles,
                         sidebar_underlays,
                         TextFont::from_font_size(font_size).with_font(font.clone()),
@@ -243,7 +243,7 @@ fn setup_ui(
                 let props_styles = build_props_styles(&OBJECTS[0]);
 
                 right.spawn((
-                    TextBuffer::<TextSpan>::new(props_text),
+                    InstancedText::<TextSpan>::new(props_text),
                     props_styles,
                     TextFont::from_font_size(font_size).with_font(font.clone()),
                     TextColor(Color::srgb(0.82, 0.82, 0.82)),
@@ -273,7 +273,7 @@ fn setup_ui(
 
                 // Log text view
                 right.spawn((
-                    TextBuffer::<TextSpan>::new(
+                    InstancedText::<TextSpan>::new(
                         "[00:00:00] Inspector started\n[00:00:00] Scene loaded: 5 objects",
                     ),
                     LineStyles::default(),
@@ -429,14 +429,14 @@ fn rebuild_properties_on_selection(
     mut state: ResMut<InspectorState>,
     mut sidebar_q: Query<
         (
-            &mut TextBuffer<TextSpan>,
+            &mut InstancedText<TextSpan>,
             &mut LineStyles,
             &mut TextUnderlays,
         ),
         (With<SidebarPanel>, Without<PropertiesPanel>),
     >,
     mut props_q: Query<
-        (&mut TextBuffer<TextSpan>, &mut LineStyles),
+        (&mut InstancedText<TextSpan>, &mut LineStyles),
         (With<PropertiesPanel>, Without<SidebarPanel>),
     >,
 ) {
@@ -471,7 +471,7 @@ fn tick_log_panel(
     time: Res<Time>,
     mut log_q: Query<
         (
-            &mut TextBuffer<TextSpan>,
+            &mut InstancedText<TextSpan>,
             &mut bevy::ui::ScrollPosition,
             &DisplayLayout,
             &ComputedNode,

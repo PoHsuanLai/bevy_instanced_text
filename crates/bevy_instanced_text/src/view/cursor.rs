@@ -1,7 +1,7 @@
 //! Buffer-position → node-local logical px anchoring.
 //!
 //! [`BufferAnchorParam`] is the higher-level companion to
-//! [`crate::RowMetricsParam`]: it folds in the editor's `TextBuffer`
+//! [`crate::RowMetricsParam`]: it folds in the editor's `InstancedText`
 //! and `DisplayLayout` so LSP-flavored `(line, character)` and
 //! rope-flavored `char_index` lookups land on the same screen pixel.
 //!
@@ -41,7 +41,7 @@ use std::marker::PhantomData;
 use super::bounds::{row_metrics_with_baseline, RowMetrics, DEFAULT_BASELINE_OFFSET_RATIO};
 use super::font::MonoCellWidth;
 use super::pipeline::DisplayLayout;
-use super::text::{TextBuffer, TextContent};
+use super::text::{InstancedText, TextContent};
 use bevy::ecs::component::Component;
 use bevy::text::TextFont;
 
@@ -90,7 +90,7 @@ type BufferAnchorQuery<'w, 's, T> = Query<
         &'static TextFont,
         &'static bevy::text::LineHeight,
         &'static MonoCellWidth,
-        &'static TextBuffer<T>,
+        &'static InstancedText<T>,
         Option<&'static DisplayLayout>,
     ),
 >;
@@ -263,7 +263,7 @@ mod tests {
         let line_height = bevy::text::LineHeight::Px(21.0);
         let mono = MonoCellWidth { px: 8.4 };
         let buffer =
-            TextBuffer::<super::super::text::TextSpan>::new("hello world\nsecond line\nthird");
+            InstancedText::<super::super::text::TextSpan>::new("hello world\nsecond line\nthird");
         let mut layout = DisplayLayout::default();
         layout.baseline_offset = 14.0 * 0.32;
 
@@ -309,7 +309,7 @@ mod tests {
         let font = bevy::text::TextFont::from_font_size(14.0);
         let line_height = bevy::text::LineHeight::Px(21.0);
         let mono = MonoCellWidth { px: 8.4 };
-        let buffer = TextBuffer::<super::super::text::TextSpan>::new("plain text");
+        let buffer = InstancedText::<super::super::text::TextSpan>::new("plain text");
 
         let mut world = World::new();
         let entity = world

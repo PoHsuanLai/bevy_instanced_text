@@ -7,7 +7,7 @@
 //!
 //! ## Concepts
 //!
-//! A text view entity is a standard Bevy UI `Node` carrying a [`TextBuffer<T>`].
+//! A text view entity is a standard Bevy UI `Node` carrying a [`InstancedText<T>`].
 //! Size it with `Node::width`/`height`; add `Node::padding` to inset the text
 //! area from the node edges. Everything else is standard Bevy UI — hit-testing,
 //! picking, and layout are all handled by the UI system automatically.
@@ -16,7 +16,7 @@
 //! ships [`TextSpan`] (a `String` wrapper) for simple labels; editors plug in a
 //! rope-backed type and terminals plug in a grid-derived type.
 //!
-//! Components paired with [`TextBuffer<T>`]:
+//! Components paired with [`InstancedText<T>`]:
 //!
 //! - **`TextFont`** — font path, size, and line height.
 //! - **[`TextColor`]** / **[`TextBackgroundColor`]** — foreground and background colors.
@@ -71,7 +71,7 @@
 //!
 //! // Left text view — sized to half the window in logical pixels.
 //! commands.spawn((
-//!     bevy_instanced_text::TextBuffer::<bevy_instanced_text::TextSpan>::new("left pane"),
+//!     bevy_instanced_text::InstancedText::<bevy_instanced_text::TextSpan>::new("left pane"),
 //!     Node { width: Val::Px(window.width() / 2.0), height: Val::Px(window.height()), ..default() },
 //!     RenderLayers::layer(0),
 //! ));
@@ -93,7 +93,7 @@
 //!         commands.spawn(Camera2d);
 //!         // Text view — size it with Node; padding insets the text area.
 //!         commands.spawn((
-//!             TextBuffer::<TextSpan>::new("hello world"),
+//!             InstancedText::<TextSpan>::new("hello world"),
 //!             Node {
 //!                 width: Val::Vw(100.0),
 //!                 height: Val::Vh(100.0),
@@ -119,7 +119,7 @@ pub mod prelude {
         BufferAnchorParam, ContentMetrics, CornerRadii, DisplayLayout, FontSynthesis,
         FormattedSpan, HiddenLines, InstancedTextPlugin, InstancedTextPlugins, LineStyles,
         MonoCellWidth, MonoFontFaces, RectOverlay, RowMetrics, RowMetricsParam, RowVertical,
-        TextBackgroundColor, TextBounds, TextBuffer, TextColor, TextContent, TextContentPlugin,
-        TextFormat, TextLabel, TextOverlays, TextSpan, TextUnderlays,
+        TextBackgroundColor, TextBounds, InstancedText, TextColor, TextContent, TextContentPlugin,
+        TextFormat, TextOverlays, TextSpan, TextUnderlays,
     };
 }

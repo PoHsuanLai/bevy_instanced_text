@@ -5,7 +5,7 @@
 [![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](https://github.com/PoHsuanLai/bevy_instanced_text)
 [![Bevy](https://img.shields.io/badge/Bevy-0.18-blue)](https://bevyengine.org)
 
-GPU-instanced text rendering for Bevy. Spawn a `TextBuffer<T>` on a Bevy UI `Node` and the plugin renders it via one instanced draw call per view. No input model, no UI framework coupling.
+GPU-instanced text rendering for Bevy. Spawn an `InstancedText<T>` on a Bevy UI `Node` and the plugin renders it via one instanced draw call per view. No input model, no UI framework coupling.
 
 ## Quick start
 
@@ -21,7 +21,7 @@ fn main() {
         .add_systems(Startup, |mut commands: Commands| {
             commands.spawn(Camera2d);
             commands.spawn((
-                TextBuffer::<TextSpan>::new("hello world"),
+                InstancedText::<TextSpan>::new("hello world"),
                 Node {
                     width: Val::Vw(100.0),
                     height: Val::Vh(100.0),
@@ -38,7 +38,7 @@ fn main() {
 
 | Type | Role |
 |---|---|
-| `TextBuffer<T>` | The content. Generic over any `T: TextContent` — ship-built impls include `TextSpan` (a `String` wrapper) and `String` itself; downstream crates plug in rope-backed types. Auto-cascades every renderer component a view needs. |
+| `InstancedText<T>` | The content. Generic over any `T: TextContent` — ship-built impls include `TextSpan` (a `String` wrapper) and `String` itself; downstream crates plug in rope-backed types. Auto-cascades every renderer component a view needs. |
 | `TextFont` | Per-entity font handle, size, hinting. Re-exported from `bevy::text`. |
 | `MonoFontFaces` | Optional bold/italic/bold-italic faces and font-synthesis policy for one-font-per-style layouts. |
 | `LineStyles` | Per-line styled runs (colors, bold, italic, inline backgrounds). Producers write this; the engine reads it. |
@@ -54,7 +54,7 @@ Scroll state is `bevy::ui::ScrollPosition` — write to it to move the viewport;
 
 ## Layout production
 
-The engine's `produce_layouts` system walks every `TextBuffer<T>` each frame, reads optional `HiddenLines` / `LineStyles` / `TextBounds`, shapes the visible window via cosmic-text, soft-wraps if needed, and writes `DisplayLayout`. Hosts producing styled content write `LineStyles` before `LayoutProduceSet`; the engine reads it within the set.
+The engine's `produce_layouts` system walks every `InstancedText<T>` each frame, reads optional `HiddenLines` / `LineStyles` / `TextBounds`, shapes the visible window via cosmic-text, soft-wraps if needed, and writes `DisplayLayout`. Hosts producing styled content write `LineStyles` before `LayoutProduceSet`; the engine reads it within the set.
 
 ## Hit-testing and overlay placement
 

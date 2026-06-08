@@ -1,7 +1,7 @@
 //! Wrap-aware layout producer.
 //!
 //! `produce_layouts` is the engine's per-frame layout system. It walks
-//! every `TextBuffer<T>` entity, reads its (optional) [`HiddenLines`] /
+//! every `InstancedText<T>` entity, reads its (optional) [`HiddenLines`] /
 //! [`LineStyles`] / [`TextBounds`] data Components, shapes the visible
 //! window through cosmic-text, and (when soft wrap is enabled) splits long
 //! lines on a pixel-budget boundary into multiple `ShapedLine` rows. The
@@ -14,7 +14,7 @@ use std::sync::Arc;
 use super::font::MonoCellWidth;
 use super::glyph::{LineShape, ShapedGlyph, ShapedLine, TextFormat};
 use super::pipeline::DisplayLayout;
-use super::text::{ContentMetrics, TextBuffer, TextContent};
+use super::text::{ContentMetrics, InstancedText, TextContent};
 use super::text_style::{FormattedSpan, HiddenLines, LineStyles, TextBounds};
 use crate::gpu::GlyphAtlas;
 use bevy::ui::{ComputedNode, ScrollPosition};
@@ -90,7 +90,7 @@ pub fn visible_buffer_range(
 #[derive(bevy::ecs::query::QueryData)]
 #[query_data(mutable)]
 pub struct LayoutRow<T: TextContent + Component> {
-    buffer: &'static TextBuffer<T>,
+    buffer: &'static InstancedText<T>,
     scroll: &'static ScrollPosition,
     metrics: &'static mut ContentMetrics,
     viewport: &'static ComputedNode,
@@ -108,7 +108,7 @@ pub struct LayoutRow<T: TextContent + Component> {
 
 /// Change filter for [`produce_layouts`] — rebuild when any layout input moves.
 type LayoutChanged<T> = Or<(
-    Changed<TextBuffer<T>>,
+    Changed<InstancedText<T>>,
     Changed<ScrollPosition>,
     Changed<ComputedNode>,
     Changed<TextFont>,
@@ -123,7 +123,7 @@ type LayoutChanged<T> = Or<(
 
 /// The engine's layout system. Registered by `TextContentPlugin<T>`.
 ///
-/// Walks every `TextBuffer<T>` entity, fingerprints its inputs, skips when
+/// Walks every `InstancedText<T>` entity, fingerprints its inputs, skips when
 /// nothing changed, and otherwise rebuilds the entity's `DisplayLayout`.
 /// Reads `Option<&HiddenLines>` and `Option<&LineStyles>` for editor-domain
 /// folding / styling.
@@ -754,7 +754,7 @@ mod tests {
 
         let entity = world
             .spawn((
-                TextBuffer::<crate::view::text::TextSpan>::new(
+                InstancedText::<crate::view::text::TextSpan>::new(
                     "hello world\nsecond line\nthird line\n",
                 ),
                 bevy::ui::ScrollPosition::default(),
@@ -779,7 +779,7 @@ mod tests {
         // Mimic the edit: replace buffer contents via DerefMut.
         {
             let mut buf = world
-                .get_mut::<TextBuffer<crate::view::text::TextSpan>>(entity)
+                .get_mut::<InstancedText<crate::view::text::TextSpan>>(entity)
                 .unwrap();
             buf.0 = crate::view::text::TextSpan::new("hello\n world\nsecond line\nthird line\n");
         }

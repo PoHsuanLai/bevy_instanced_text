@@ -13,24 +13,24 @@ Downstream crates — rope-backed editor primitives, the full code editor, the t
 
 ## Migrating from Bevy UI `Text`
 
-The component that holds the string changes from `Text` to `TextLabel` (a type alias for `TextBuffer<TextSpan>`). **Everything else stays the same** — you spawn the same `Node`, and you style it with the exact same Bevy components (`TextFont`, `TextColor`, `TextLayout`), because this crate reads Bevy's own components rather than reinventing them.
+The component that holds the string changes from `Text` to `InstancedText` (a generic `InstancedText<T>`; use `InstancedText<TextSpan>` for plain strings). **Everything else stays the same** — you spawn the same `Node`, and you style it with the exact same Bevy components (`TextFont`, `TextColor`, `TextLayout`), because this crate reads Bevy's own components rather than reinventing them.
 
 ### A basic label
 
 ```diff
   commands.spawn((
 -     Text::new("hello world"),
-+     TextLabel::new("hello world"),   // = TextBuffer<TextSpan>
++     InstancedText::from("hello world"),   // InstancedText<TextSpan>
       TextFont::from_font_size(16.0),
       TextColor(Color::WHITE),
       Node { width: Val::Px(400.0), height: Val::Px(40.0), ..default() },
   ));
 ```
 
-`TextLabel` is a type alias for `TextBuffer<TextSpan>`, and it carries
-`From<&str>`/`From<String>` so the content swap is a true one-liner — no
-turbofish. `TextFont`, `TextColor`, and `Node` are unchanged because the engine
-reads Bevy's own components.
+`InstancedText<TextSpan>` carries `From<&str>`/`From<String>`, so for the
+plain-string case the content swap is a true one-liner — no turbofish.
+`TextFont`, `TextColor`, and `Node` are unchanged because the engine reads
+Bevy's own components.
 
 The only addition required at the app level is the plugin and a `Camera2d`:
 
@@ -42,7 +42,7 @@ The only addition required at the app level is the plugin and a `Camera2d`:
 +         commands.spawn(Camera2d);
           commands.spawn((
 -             Text::new("hello world"),
-+             TextLabel::new("hello world"),
++             InstancedText::from("hello world"),
               TextFont::from_font_size(16.0),
               TextColor(Color::WHITE),
               Node { width: Val::Px(400.0), height: Val::Px(40.0), ..default() },
@@ -77,7 +77,7 @@ use bevy_instanced_text::prelude::*;
 
 fn setup(mut commands: Commands) {
     commands.spawn((
-        TextLabel::new("hello world\nsecond line"),    // ← swap Text → TextLabel
+        InstancedText::from("hello world\nsecond line"), // ← swap Text → InstancedText
         TextFont::from_font_size(16.0),                 // ← same component
         TextColor(Color::srgb(0.9, 0.9, 0.9)),          // ← same component
         TextLayout::new_with_justify(Justify::Center),  // ← same component
@@ -90,7 +90,7 @@ fn setup(mut commands: Commands) {
 
 | Concern | Bevy UI `Text` | `bevy_instanced_text` | Same? |
 |---|---|---|---|
-| The string | `Text(String)` | `TextLabel` (= `TextBuffer<TextSpan>`) | swap component |
+| The string | `Text(String)` | `InstancedText<TextSpan>` (any `T: TextContent`) | swap component |
 | Font, size, line height | `TextFont` + `LineHeight` | `TextFont` + `LineHeight` | ✅ identical |
 | Foreground color | `TextColor` | `TextColor` | ✅ identical |
 | Background color | `TextBackgroundColor` | `TextBackgroundColor` | ✅ identical |
@@ -130,7 +130,7 @@ by_line.insert(0, vec![
     FormattedSpan { text: "bold blue".into(), format: TextFormat::fg(0..0, blue), is_virtual: false },
 ]);
 commands.spawn((
-    TextLabel::new("normal bold blue"),
+    InstancedText::from("normal bold blue"),
     LineStyles::new(by_line),   // line 0's runs; engine rebases byte_range
     TextFont::from_font_size(16.0),
 ));
@@ -158,7 +158,7 @@ App::new()
     .add_systems(Startup, |mut commands: Commands| {
         commands.spawn(Camera2d);
         commands.spawn((
-            TextLabel::new("hello world"),
+            InstancedText::from("hello world"),
             Node { width: Val::Vw(100.0), height: Val::Vh(100.0), ..default() },
         ));
     })
@@ -166,8 +166,8 @@ App::new()
 ```
 
 `TextFont`, `TextColor`, and `TextLayout` are auto-inserted with defaults when
-you spawn the buffer, so a bare `TextLabel` renders in the default font — just
-like spawning a bare `Text`.
+you spawn the component, so a bare `InstancedText` renders in the default font —
+just like spawning a bare `Text`.
 
 Run the standalone demo: `cargo run --example text_view`.
 
