@@ -283,7 +283,10 @@ mod tests {
 
     /// `ShapedLine` with everything but `virtual_byte_ranges` zeroed — the
     /// helpers under test ignore the rest.
-    fn line_with_virtuals(text: &str, virtuals: Vec<Range<usize>>) -> ShapedLine {
+    fn line_with_virtuals(
+        text: &str,
+        virtuals: impl IntoIterator<Item = Range<usize>>,
+    ) -> ShapedLine {
         ShapedLine {
             display_row: 0,
             buffer_row: 0,
@@ -298,7 +301,7 @@ mod tests {
             padding_top: 0.0,
             padding_bottom: 0.0,
             shape: None,
-            virtual_byte_ranges: virtuals,
+            virtual_byte_ranges: virtuals.into_iter().collect(),
         }
     }
 
@@ -308,7 +311,7 @@ mod tests {
     fn source_to_concat_skips_preceding_virtuals() {
         // "fn foo([: i32 v])bar"  — virtual "[: i32 v]" at concat bytes 7..16
         // (length 9). Source bytes: "fn foo(" (0..7) then "bar" (7..10).
-        let line = line_with_virtuals("fn foo([: i32 v])bar", vec![7..16]);
+        let line = line_with_virtuals("fn foo([: i32 v])bar", std::iter::once(7..16));
 
         // Source byte 0 → concat 0
         assert_eq!(line.concat_byte_for_source_byte(0), 0);
@@ -322,7 +325,7 @@ mod tests {
     /// back to the source byte at the virtual range's right edge.
     #[test]
     fn concat_to_source_skips_back_over_virtuals() {
-        let line = line_with_virtuals("fn foo([: i32 v])bar", vec![7..16]);
+        let line = line_with_virtuals("fn foo([: i32 v])bar", std::iter::once(7..16));
 
         assert_eq!(line.source_byte_for_concat_byte(0, false), 0);
         assert_eq!(line.source_byte_for_concat_byte(7, false), 7);
@@ -335,7 +338,7 @@ mod tests {
     /// based on `snap_right`.
     #[test]
     fn concat_to_source_snaps_inside_virtual_range() {
-        let line = line_with_virtuals("fn foo([: i32 v])bar", vec![7..16]);
+        let line = line_with_virtuals("fn foo([: i32 v])bar", std::iter::once(7..16));
 
         // concat 10 falls inside 7..16.
         // snap_right=false: snap to the left edge → source 7.
@@ -348,7 +351,7 @@ mod tests {
     /// Detects whether a concat byte is inside a virtual range.
     #[test]
     fn virtual_range_at_concat_byte_finds_containing_range() {
-        let line = line_with_virtuals("abXXXcd", vec![2..5]);
+        let line = line_with_virtuals("abXXXcd", std::iter::once(2..5));
 
         assert!(line.virtual_range_at_concat_byte(1).is_none());
         assert_eq!(line.virtual_range_at_concat_byte(2), Some(2..5));
@@ -362,7 +365,7 @@ mod tests {
     fn multiple_virtuals_compose() {
         // "a[X]b[YY]c" with virtuals 1..4 (`[X]`) and 5..9 (`[YY]`).
         // Source layout: "a" (0..1), "b" (1..2), "c" (2..3).
-        let line = line_with_virtuals("a[X]b[YY]c", vec![1..4, 5..9]);
+        let line = line_with_virtuals("a[X]b[YY]c", [1..4, 5..9]);
 
         assert_eq!(line.concat_byte_for_source_byte(0), 0);
         assert_eq!(line.concat_byte_for_source_byte(1), 4); // past [X]

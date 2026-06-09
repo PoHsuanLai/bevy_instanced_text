@@ -248,8 +248,7 @@ mod tests {
     #[test]
     fn empty_line_is_not_keyed() {
         // A line with no segments contributes a blank buffer line but no runs.
-        let (text, styles) =
-            styled_lines([vec![("a", fg(Color::WHITE))], Vec::<(&str, _)>::new()]);
+        let (text, styles) = styled_lines([vec![("a", fg(Color::WHITE))], Vec::<(&str, _)>::new()]);
         assert_eq!(text, "a\n");
         assert!(styles.get(0).is_some());
         assert!(styles.get(1).is_none());

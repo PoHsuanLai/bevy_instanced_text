@@ -21,7 +21,9 @@ use bevy::prelude::*;
 use bevy::ui::ui_transform::UiGlobalTransform;
 
 use bevy::ui::{ComputedNode, ScrollPosition};
-use bevy_instanced_text::{ContentMetrics, DisplayLayout, MonoCellWidth, InstancedText, TextContent};
+use bevy_instanced_text::{
+    ContentMetrics, DisplayLayout, InstancedText, MonoCellWidth, TextContent,
+};
 
 use crate::interaction_states::{ScrollConfig, TextViewDragState};
 use crate::text_state::{CursorState, SelectionState};
@@ -491,10 +493,7 @@ impl Default for InteractionSettings {
 /// Picking dispatches `Pointer<Drag>` to the entity that received the
 /// initial press, so this stays scoped to the view that started the drag
 /// even if the cursor moves out of its viewport.
-pub fn on_pointer_drag<T: TextContent>(
-    trigger: On<Pointer<Drag>>,
-    mut views: DragQuery<T>,
-) {
+pub fn on_pointer_drag<T: TextContent>(trigger: On<Pointer<Drag>>, mut views: DragQuery<T>) {
     if trigger.event().button != PointerButton::Primary {
         return;
     }

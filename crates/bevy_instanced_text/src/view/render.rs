@@ -303,18 +303,18 @@ pub fn render_layout(
                 emit_unshaped_run_glyphs(
                     line,
                     0..line.text.len(),
-                    anchor,
-                    style,
-                    RunMetrics {
-                        font_size,
-                        start_x: 0.0,
+                    RunPaint {
+                        anchor,
+                        style,
+                        face: RunFace {
+                            id: faces.regular,
+                            bold: false,
+                            italic: false,
+                        },
+                        seg_x_start: 0.0,
+                        seg_font_size: font_size,
                     },
                     atlas,
-                    RunFace {
-                        id: faces.regular,
-                        bold: false,
-                        italic: false,
-                    },
                     &mut text_instances,
                 );
             }
@@ -362,6 +362,13 @@ pub fn render_layout(
                 } else {
                     font_size
                 };
+                let paint = RunPaint {
+                    anchor,
+                    style,
+                    face,
+                    seg_x_start,
+                    seg_font_size,
+                };
 
                 // For runs with a background, emit the bg and the glyphs
                 // from the same shape so the bg can size itself to the
@@ -373,30 +380,26 @@ pub fn render_layout(
                         emit_run_with_bg(
                             line,
                             run,
-                            anchor,
-                            style,
-                            seg_x_start,
-                            seg_x_end,
-                            seg_font_size,
-                            line_height,
-                            baseline_offset,
-                            bg,
+                            paint,
+                            BgBand {
+                                seg_x_end,
+                                line_height,
+                                baseline_offset,
+                                color: bg,
+                            },
                             atlas,
-                            face,
                             shape_usable,
-                            &mut below_instances,
-                            &mut text_instances,
+                            RenderTargets {
+                                below: &mut below_instances,
+                                text: &mut text_instances,
+                            },
                         );
                     } else {
                         emit_run_glyphs_only(
                             line,
                             run,
-                            anchor,
-                            style,
-                            seg_x_start,
-                            seg_font_size,
+                            paint,
                             atlas,
-                            face,
                             shape_usable,
                             &mut text_instances,
                         );
@@ -405,12 +408,8 @@ pub fn render_layout(
                     emit_run_glyphs_only(
                         line,
                         run,
-                        anchor,
-                        style,
-                        seg_x_start,
-                        seg_font_size,
+                        paint,
                         atlas,
-                        face,
                         shape_usable,
                         &mut text_instances,
                     );
@@ -420,11 +419,13 @@ pub fn render_layout(
                     emit_run_decoration(
                         run.decoration,
                         run.fg,
-                        anchor,
-                        line_height,
-                        baseline_offset,
-                        seg_x_start,
-                        seg_x_end,
+                        RowBand {
+                            anchor,
+                            line_height,
+                            baseline_offset,
+                            x_start: seg_x_start,
+                            x_end: seg_x_end,
+                        },
                         atlas.solid_uv,
                         &mut text_instances,
                     );
@@ -542,16 +543,6 @@ fn emit_shaped_run_glyphs(
     }
 }
 
-/// Per-run metrics for the shape-on-demand fallback path. `font_size` is the
-/// rasterizer size (may differ from the line default when a `font_scale` run
-/// overrides); `start_x` is the run's pen-x relative to the line origin (where
-/// it picks up after any preceding runs).
-#[derive(Clone, Copy)]
-struct RunMetrics {
-    font_size: f32,
-    start_x: f32,
-}
-
 /// The resolved font face for a run plus the synthesis flags the shaper needs.
 /// These three always travel together — the face is picked from `bold`/`italic`
 /// (or the run's explicit font), and the shaper re-applies the flags to select
@@ -564,6 +555,40 @@ struct RunFace {
     italic: bool,
 }
 
+/// Everything an emitter needs to paint one run's glyphs: where the row sits
+/// (`anchor`), how it looks (`style`), which face to shape with (`face`), and
+/// the run's horizontal/size geometry. `seg_font_size` is the rasterizer size
+/// (may differ from the line default under a `font_scale` run); `seg_x_start`
+/// is the run's pen-x relative to the line origin. Computed once per run and
+/// threaded through the emit functions so their signatures stay legible.
+#[derive(Clone, Copy)]
+struct RunPaint {
+    anchor: RowAnchor,
+    style: RunStyle,
+    face: RunFace,
+    seg_x_start: f32,
+    seg_font_size: f32,
+}
+
+/// The vertical band a per-run background quad fills, plus its color. `seg_x_end`
+/// closes the advance range opened by [`RunPaint::seg_x_start`]; `line_height`
+/// and `baseline_offset` place the band against the glyph row.
+#[derive(Clone, Copy)]
+struct BgBand {
+    seg_x_end: f32,
+    line_height: f32,
+    baseline_offset: f32,
+    color: bevy::prelude::Color,
+}
+
+/// The two instance buffers a run can paint into: `below` for backgrounds that
+/// sit under the glyphs, `text` for the glyphs themselves. Painter's order is
+/// applied later by the caller.
+struct RenderTargets<'a> {
+    below: &'a mut Vec<GlyphInstance>,
+    text: &'a mut Vec<GlyphInstance>,
+}
+
 /// Emit glyphs for a byte range by shaping it on demand. Used when no
 /// `LineShape` is attached (`trivial_layout` consumers) or when a
 /// `TextFormat.font_scale` override requires re-shaping at a different size.
@@ -574,23 +599,32 @@ struct RunFace {
 fn emit_unshaped_run_glyphs(
     line: &ShapedLine,
     range: std::ops::Range<usize>,
-    anchor: RowAnchor,
-    style: RunStyle,
-    metrics: RunMetrics,
+    paint: RunPaint,
     atlas: &mut GlyphAtlas,
-    face: RunFace,
     out: &mut Vec<GlyphInstance>,
 ) {
     let Some(slice) = line.text.get(range) else {
         return;
     };
     let shape_text = slice.strip_suffix('\n').unwrap_or(slice);
-    let shape = atlas.shape_line_styled(shape_text, metrics.font_size, face.id, face.bold, face.italic);
+    let shape = atlas.shape_line_styled(
+        shape_text,
+        paint.seg_font_size,
+        paint.face.id,
+        paint.face.bold,
+        paint.face.italic,
+    );
     for g in &shape.glyphs {
         let Some((info, _)) = atlas.get_or_rasterize_glyph(g.cache_key) else {
             continue;
         };
-        push_glyph(info, metrics.start_x + g.x, anchor, style, out);
+        push_glyph(
+            info,
+            paint.seg_x_start + g.x,
+            paint.anchor,
+            paint.style,
+            out,
+        );
     }
 }
 
@@ -598,70 +632,45 @@ fn emit_unshaped_run_glyphs(
 /// emit the glyphs. Using advance bounds (not ink bounds) means the chip
 /// extends to the same edges as the surrounding text's character cells,
 /// matching how browsers render `<code>` — no side-bearing gap on either side.
-#[allow(clippy::too_many_arguments)]
 fn emit_run_with_bg(
     line: &ShapedLine,
     run: &TextFormat,
-    anchor: RowAnchor,
-    style: RunStyle,
-    seg_x_start: f32,
-    seg_x_end: f32,
-    seg_font_size: f32,
-    line_height: f32,
-    baseline_offset: f32,
-    bg: bevy::prelude::Color,
+    paint: RunPaint,
+    band: BgBand,
     atlas: &mut GlyphAtlas,
-    face: RunFace,
     shape_usable: Option<&Arc<super::glyph::LineShape>>,
-    below: &mut Vec<GlyphInstance>,
-    text: &mut Vec<GlyphInstance>,
+    targets: RenderTargets,
 ) {
-    let baseline_y_off = line_height * 0.5 + baseline_offset;
-    let cap_to_descender = baseline_y_off + baseline_offset * 0.6;
+    let baseline_y_off = band.line_height * 0.5 + band.baseline_offset;
+    let cap_to_descender = baseline_y_off + band.baseline_offset * 0.6;
     let text_band_above = cap_to_descender * 0.25;
     let band_top_y_off = baseline_y_off - text_band_above;
-    let bg_w = (seg_x_end - seg_x_start).max(0.0);
+    let bg_w = (band.seg_x_end - paint.seg_x_start).max(0.0);
     // Spans the glyph band, matching `RectOverlay { vertical: Full }`.
-    below.push(GlyphInstance {
+    targets.below.push(GlyphInstance {
         position: Vec2::new(
-            anchor.line_x + seg_x_start,
+            paint.anchor.line_x + paint.seg_x_start,
             line.y_top + band_top_y_off - cap_to_descender * 0.5,
         ),
         uv_min: atlas.solid_uv.uv_min,
         uv_max: atlas.solid_uv.uv_max,
         size: Vec2::new(bg_w, cap_to_descender),
-        color: linear_rgba(bg),
+        color: linear_rgba(band.color),
         z_index: 0.0,
         corner_radii: [run.corner_radius; 4],
         skew: 0.0,
         _padding: [0.0; 2],
     });
 
-    emit_run_glyphs_only(
-        line,
-        run,
-        anchor,
-        style,
-        seg_x_start,
-        seg_font_size,
-        atlas,
-        face,
-        shape_usable,
-        text,
-    );
+    emit_run_glyphs_only(line, run, paint, atlas, shape_usable, targets.text);
 }
 
 /// Emit just the run's glyphs — shape-or-unshaped path, no bg, no extra work.
-#[allow(clippy::too_many_arguments)]
 fn emit_run_glyphs_only(
     line: &ShapedLine,
     run: &TextFormat,
-    anchor: RowAnchor,
-    style: RunStyle,
-    seg_x_start: f32,
-    seg_font_size: f32,
+    paint: RunPaint,
     atlas: &mut GlyphAtlas,
-    face: RunFace,
     shape_usable: Option<&Arc<super::glyph::LineShape>>,
     out: &mut Vec<GlyphInstance>,
 ) {
@@ -669,29 +678,16 @@ fn emit_run_glyphs_only(
         emit_shaped_run_glyphs(
             &shape.glyphs,
             run.byte_range.clone(),
-            anchor,
-            style,
+            paint.anchor,
+            paint.style,
             atlas,
             out,
         );
     } else {
-        emit_unshaped_run_glyphs(
-            line,
-            run.byte_range.clone(),
-            anchor,
-            style,
-            RunMetrics {
-                font_size: seg_font_size,
-                start_x: seg_x_start,
-            },
-            atlas,
-            face,
-            out,
-        );
+        emit_unshaped_run_glyphs(line, run.byte_range.clone(), paint, atlas, out);
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 fn push_overlay_quad(
     rect: &super::overlay::RectOverlay,
     layout: &DisplayLayout,
@@ -801,22 +797,36 @@ fn linear_rgba(color: Color) -> [f32; 4] {
     [l.red, l.green, l.blue, l.alpha]
 }
 
-/// Emit thin quads for each active `TextDecoration` flag on a run.
-/// `x_start`/`x_end` are line-local pixels from `line_byte_to_x` — the same
-/// coordinate space as selection `x_range`. Y is derived from `anchor.base_y`
-/// (the glyph baseline) using the same math as `push_overlay_quad`.
-#[allow(clippy::too_many_arguments)]
-fn emit_run_decoration(
-    decoration: TextDecoration,
-    fg: Color,
+/// A horizontal band on a row: where the row sits (`anchor`), its vertical
+/// metrics (`line_height`, `baseline_offset`), and the line-local x-span it
+/// covers. `x_start`/`x_end` come from `line_byte_to_x` — the same coordinate
+/// space as selection `x_range`.
+#[derive(Clone, Copy)]
+struct RowBand {
     anchor: RowAnchor,
     line_height: f32,
     baseline_offset: f32,
     x_start: f32,
     x_end: f32,
+}
+
+/// Emit thin quads for each active `TextDecoration` flag on a run.
+/// Y is derived from `band.anchor.base_y` (the glyph baseline) using the same
+/// math as `push_overlay_quad`.
+fn emit_run_decoration(
+    decoration: TextDecoration,
+    fg: Color,
+    band: RowBand,
     solid_uv: crate::gpu::GlyphInfo,
     out: &mut Vec<GlyphInstance>,
 ) {
+    let RowBand {
+        anchor,
+        line_height,
+        baseline_offset,
+        x_start,
+        x_end,
+    } = band;
     let thickness = (line_height * 0.07).max(1.0);
     let color = linear_rgba(fg);
     let width = (x_end - x_start).max(1.0);

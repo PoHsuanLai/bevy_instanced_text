@@ -261,10 +261,11 @@ mod tests {
         let font = bevy::text::TextFont::from_font_size(14.0);
         let line_height = bevy::text::LineHeight::Px(21.0);
         let mono = MonoCellWidth { px: 8.4 };
-        let buffer =
-            InstancedText::<String>::new("hello world\nsecond line\nthird");
-        let mut layout = DisplayLayout::default();
-        layout.baseline_offset = 14.0 * 0.32;
+        let buffer = InstancedText::<String>::new("hello world\nsecond line\nthird");
+        let layout = DisplayLayout {
+            baseline_offset: 14.0 * 0.32,
+            ..default()
+        };
 
         let mut world = World::new();
         let entity = world
@@ -282,14 +283,12 @@ mod tests {
     fn buffer_pos_and_char_index_agree() {
         let (mut world, entity) = make_editor_world();
         let (a, b) = world
-            .run_system_once(
-                move |anchors: BufferAnchorParam<String>| {
-                    let a = anchors.at_buffer_pos(entity, 1, 3).unwrap();
-                    // "hello world\n" = 12 chars, "sec" = 3 → char_index 15.
-                    let b = anchors.at_char_index(entity, 15).unwrap();
-                    (a, b)
-                },
-            )
+            .run_system_once(move |anchors: BufferAnchorParam<String>| {
+                let a = anchors.at_buffer_pos(entity, 1, 3).unwrap();
+                // "hello world\n" = 12 chars, "sec" = 3 → char_index 15.
+                let b = anchors.at_char_index(entity, 15).unwrap();
+                (a, b)
+            })
             .unwrap();
         assert_eq!(a.display_row, b.display_row);
         assert!((a.pixel_x - b.pixel_x).abs() < 1e-3);
@@ -316,11 +315,9 @@ mod tests {
             .id();
 
         let anchor = world
-            .run_system_once(
-                move |anchors: BufferAnchorParam<String>| {
-                    anchors.at_buffer_pos(entity, 0, 5).unwrap()
-                },
-            )
+            .run_system_once(move |anchors: BufferAnchorParam<String>| {
+                anchors.at_buffer_pos(entity, 0, 5).unwrap()
+            })
             .unwrap();
         // No layout → 1:1 buffer-row, monospace columns.
         assert_eq!(anchor.display_row, 0);
@@ -334,11 +331,9 @@ mod tests {
     fn top_left_matches_legacy_cursor_screen_pos() {
         let (mut world, entity) = make_editor_world();
         let anchor = world
-            .run_system_once(
-                move |anchors: BufferAnchorParam<String>| {
-                    anchors.at_buffer_pos(entity, 1, 3).unwrap()
-                },
-            )
+            .run_system_once(move |anchors: BufferAnchorParam<String>| {
+                anchors.at_buffer_pos(entity, 1, 3).unwrap()
+            })
             .unwrap();
 
         // Legacy formula from examples/editor_lsp.rs::cursor_screen_pos
@@ -360,11 +355,9 @@ mod tests {
     fn top_left_matches_row_metrics() {
         let (mut world, entity) = make_editor_world();
         let anchor = world
-            .run_system_once(
-                move |anchors: BufferAnchorParam<String>| {
-                    anchors.at_buffer_pos(entity, 2, 4).unwrap()
-                },
-            )
+            .run_system_once(move |anchors: BufferAnchorParam<String>| {
+                anchors.at_buffer_pos(entity, 2, 4).unwrap()
+            })
             .unwrap();
 
         let computed = make_computed();

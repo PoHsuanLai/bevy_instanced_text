@@ -302,7 +302,8 @@ pub struct RowMetricsRow {
 impl RowMetricsRowItem<'_, '_> {
     /// Resolve this row's columns into a [`RowMetrics`].
     fn metrics(&self) -> RowMetrics {
-        let line_height = crate::view::font::resolve_line_height(*self.line_height, self.font.font_size);
+        let line_height =
+            crate::view::font::resolve_line_height(*self.line_height, self.font.font_size);
         let baseline = self
             .layout
             .map(|l| l.baseline_offset)
@@ -535,16 +536,23 @@ mod tests {
         use bevy::prelude::*;
 
         let mut world = World::new();
-        let mut computed = bevy::ui::ComputedNode::default();
-        computed.size = bevy::math::Vec2::new(800.0, 600.0);
-        computed.inverse_scale_factor = 1.0;
-        computed.padding.min_inset = bevy::math::Vec2::new(50.0, 8.0);
+        let computed = bevy::ui::ComputedNode {
+            size: bevy::math::Vec2::new(800.0, 600.0),
+            inverse_scale_factor: 1.0,
+            padding: bevy::sprite::BorderRect {
+                min_inset: bevy::math::Vec2::new(50.0, 8.0),
+                ..default()
+            },
+            ..default()
+        };
         let scroll = ScrollPosition(bevy::math::Vec2::new(0.0, 100.0));
         let font = bevy::text::TextFont::from_font_size(14.0);
         let line_height_comp = bevy::text::LineHeight::Px(21.0);
         let mono = MonoCellWidth { px: 8.4 };
-        let mut layout = DisplayLayout::default();
-        layout.baseline_offset = 14.0 * 0.32;
+        let layout = DisplayLayout {
+            baseline_offset: 14.0 * 0.32,
+            ..default()
+        };
 
         let direct = row_metrics_with_baseline(
             &computed,

@@ -73,7 +73,7 @@ fn intrinsic_widths<T: TextContent>(buffer: &T, cell_px: f32) -> (f32, f32) {
         let line = buffer.line(i);
         let trimmed = line.strip_suffix('\n').unwrap_or(&line);
         max_chars = max_chars.max(trimmed.chars().count());
-        for word in trimmed.split(|c: char| c == ' ' || c == '\t') {
+        for word in trimmed.split([' ', '\t']) {
             min_chars = min_chars.max(word.chars().count());
         }
     }
@@ -164,39 +164,42 @@ impl<T: TextContent> Plugin for TextContentPlugin<T> {
     }
 }
 
+/// The per-entity columns `measure_text_buffer` reads/writes. Bundled into a
+/// `QueryData` so the system signature stays legible.
+#[derive(bevy::ecs::query::QueryData)]
+#[query_data(mutable)]
+struct MeasureRow<T: TextContent> {
+    content_size: &'static mut ContentSize,
+    buffer: &'static InstancedText<T>,
+    line_height: &'static bevy::text::LineHeight,
+    font: &'static TextFont,
+    mono: &'static MonoCellWidth,
+}
+
+/// Change filter for [`measure_text_buffer`] — re-measure when any input that
+/// affects the intrinsic size moves, or when `ContentSize` is first added.
+type MeasureChanged<T> = Or<(
+    Changed<InstancedText<T>>,
+    Changed<bevy::text::LineHeight>,
+    Changed<TextFont>,
+    Changed<MonoCellWidth>,
+    Added<ContentSize>,
+)>;
+
 /// Installs a [`InstancedTextMeasure`] on every `InstancedText<T>` entity so bevy_ui
 /// knows their intrinsic line height and width. Runs in `UiSystems::Content`,
 /// before taffy lays out the tree. Only updates when an input that affects the
 /// measured size changes so layout invalidation stays minimal.
-fn measure_text_buffer<T: TextContent>(
-    mut q: Query<
-        (
-            &mut ContentSize,
-            &InstancedText<T>,
-            &bevy::text::LineHeight,
-            &TextFont,
-            &MonoCellWidth,
-        ),
-        (
-            With<InstancedText<T>>,
-            Or<(
-                Changed<InstancedText<T>>,
-                Changed<bevy::text::LineHeight>,
-                Changed<TextFont>,
-                Changed<MonoCellWidth>,
-                Added<ContentSize>,
-            )>,
-        ),
-    >,
-) {
-    for (mut content_size, buffer, line_height, font, mono) in q.iter_mut() {
-        let lh = resolve_line_height(*line_height, font.font_size);
-        let (max_content_width, min_content_width) = intrinsic_widths(&**buffer, mono.px);
-        content_size.set(NodeMeasure::Custom(Box::new(InstancedTextMeasure {
-            line_height: lh,
-            max_content_width,
-            min_content_width,
-        })));
+fn measure_text_buffer<T: TextContent>(mut q: Query<MeasureRow<T>, MeasureChanged<T>>) {
+    for mut row in q.iter_mut() {
+        let lh = resolve_line_height(*row.line_height, row.font.font_size);
+        let (max_content_width, min_content_width) = intrinsic_widths(&**row.buffer, row.mono.px);
+        row.content_size
+            .set(NodeMeasure::Custom(Box::new(InstancedTextMeasure {
+                line_height: lh,
+                max_content_width,
+                min_content_width,
+            })));
     }
 }
 
@@ -516,7 +519,10 @@ mod tests {
         // Three lines; the middle one ("fourteen chars" = 14) is widest. Cell 10px.
         let buffer = String::from("short\nfourteen chars\nmid");
         let (max_w, _min_w) = intrinsic_widths(&buffer, 10.0);
-        assert_eq!(max_w, 140.0, "max-content = widest line's char count × cell");
+        assert_eq!(
+            max_w, 140.0,
+            "max-content = widest line's char count × cell"
+        );
     }
 
     #[test]

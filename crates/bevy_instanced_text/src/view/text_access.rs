@@ -149,7 +149,8 @@ pub fn produce_layouts<T: TextContent>(
         if matches!(linebreak, bevy::text::LineBreak::NoWrap) {
             wrap.width = None;
         }
-        let line_height = crate::view::font::resolve_line_height(*row.line_height, row.font.font_size);
+        let line_height =
+            crate::view::font::resolve_line_height(*row.line_height, row.font.font_size);
         let new_layout = build_display_layout(
             &**row.buffer,
             row.scroll.y,
@@ -754,9 +755,7 @@ mod tests {
 
         let entity = world
             .spawn((
-                InstancedText::<String>::new(
-                    "hello world\nsecond line\nthird line\n",
-                ),
+                InstancedText::<String>::new("hello world\nsecond line\nthird line\n"),
                 bevy::ui::ScrollPosition::default(),
                 ContentMetrics::default(),
                 test_computed(),
@@ -770,23 +769,17 @@ mod tests {
             ))
             .id();
 
-        world
-            .run_system_once(produce_layouts::<String>)
-            .unwrap();
+        world.run_system_once(produce_layouts::<String>).unwrap();
         let lines1 = world.get::<DisplayLayout>(entity).unwrap().lines.len();
         assert_eq!(lines1, 4, "initial layout: 4 rows");
 
         // Mimic the edit: replace buffer contents via DerefMut.
         {
-            let mut buf = world
-                .get_mut::<InstancedText<String>>(entity)
-                .unwrap();
+            let mut buf = world.get_mut::<InstancedText<String>>(entity).unwrap();
             buf.0 = String::from("hello\n world\nsecond line\nthird line\n");
         }
 
-        world
-            .run_system_once(produce_layouts::<String>)
-            .unwrap();
+        world.run_system_once(produce_layouts::<String>).unwrap();
         let layout2 = world.get::<DisplayLayout>(entity).unwrap();
         assert_eq!(
             layout2.lines.len(),
@@ -848,7 +841,10 @@ mod tests {
     /// Build a layout from styled spans (no atlas → no shape, but the
     /// virtual-range tracking lives in the concat loop which runs
     /// regardless of shaping).
-    fn build_with_styles(buffer_text: &str, by_line: HashMap<u32, Vec<FormattedSpan>>) -> DisplayLayout {
+    fn build_with_styles(
+        buffer_text: &str,
+        by_line: HashMap<u32, Vec<FormattedSpan>>,
+    ) -> DisplayLayout {
         let styles = LineStyles::new(by_line);
         let mut metrics = ContentMetrics::default();
         build_display_layout(
@@ -911,10 +907,7 @@ mod tests {
     #[test]
     fn no_virtuals_means_empty_ranges() {
         let mut by_line = HashMap::new();
-        by_line.insert(
-            0u32,
-            vec![span("hello", false), span(" world", false)],
-        );
+        by_line.insert(0u32, vec![span("hello", false), span(" world", false)]);
         let layout = build_with_styles("hello world\n", by_line);
         assert!(layout.lines[0].virtual_byte_ranges.is_empty());
     }
@@ -932,7 +925,7 @@ mod tests {
             0u32,
             vec![
                 span("ab", false),
-                span("XX", true),  // 2 bytes virtual
+                span("XX", true), // 2 bytes virtual
                 span("cd", false),
             ],
         );
