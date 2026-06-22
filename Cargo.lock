@@ -993,6 +993,7 @@ dependencies = [
  "bevy_camera",
  "bitflags 2.11.1",
  "bytemuck",
+ "parley",
  "taffy 0.9.2",
 ]
 

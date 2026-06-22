@@ -26,6 +26,9 @@ bevy = { version = "0.19", default-features = false, features = [
 ] }
 bevy_camera = "0.19"
 taffy = { version = "0.9", default-features = false, features = ["std"] }
+# Same parley as bevy_text 0.19, for registering asset fonts into our private
+# FontContext (FontInfoOverride) — bevy_text doesn't re-export parley.
+parley = { version = "0.9", default-features = false, features = ["std"] }
 
 bitflags = "2"
 bytemuck = { version = "1.14", features = ["derive"] }

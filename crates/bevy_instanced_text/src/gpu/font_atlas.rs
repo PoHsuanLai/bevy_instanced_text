@@ -16,7 +16,7 @@ use bevy::text::{
     LayoutCx, LetterSpacing, LineBreak, LineHeight, ScaleCx, TextBounds, TextFont, TextLayoutInfo,
     TextPipeline,
 };
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
@@ -126,6 +126,11 @@ pub struct GlyphAtlas {
     /// [`GlyphAtlas::get_or_rasterize_glyph`]. The renderer reads this after a
     /// `render_layout` pass to pick the batch's glyph atlas image.
     last_glyph_texture: Option<AssetId<Image>>,
+    /// Font assets already registered into our private parley `font_cx`. We own
+    /// our own `FontCx` (not Bevy's shared one), so nothing else loads the font
+    /// bytes into it — without this, parley can't resolve `FontSource::Handle`
+    /// and shaping yields zero glyphs (notably in headless tests).
+    registered_fonts: HashSet<AssetId<Font>>,
 }
 
 /// Default FIFO cap on the shaped-line cache.
@@ -180,21 +185,46 @@ impl GlyphAtlas {
             raster_scale: DEFAULT_RASTER_SCALE,
             shape_cache_capacity,
             last_glyph_texture: None,
+            registered_fonts: HashSet::new(),
         }
     }
 
-    /// No-op in the FontAtlasSet world: fonts are resolved by handle through
-    /// Bevy's text pipeline at shape time. Returns the handle's `AssetId` when
-    /// the font asset is loaded so callers can detect availability, else `None`.
+    /// Register the font behind `handle` into our private parley `font_cx` (once
+    /// per asset) under the deterministic family alias [`Self::font_alias`], so
+    /// `FontSource::Family(alias)` resolves to exactly this face during shaping.
     ///
-    /// Kept for API compatibility with the old cosmic-text font registration.
+    /// We own a private `FontCx` (not Bevy's shared one), so the registration
+    /// Bevy normally performs in `load_font_assets_into_font_collection` is on
+    /// us; without it parley resolves nothing and shaping produces zero glyphs
+    /// (notably in headless tests, where no system fonts back the fallback).
     pub fn ensure_font(
         &mut self,
         handle: &Handle<Font>,
         fonts: &Assets<Font>,
     ) -> Option<AssetId<Font>> {
         let id = handle.id();
-        fonts.get(handle).map(|_| id)
+        if self.registered_fonts.contains(&id) {
+            return Some(id);
+        }
+        let font = fonts.get(handle)?;
+        let alias = Self::font_alias(id);
+        // `Font::data` is a `fontique::Blob<u8>` in Bevy 0.19. Register under our
+        // alias family name so a `FontSource::Family(alias)` lookup hits it.
+        self.font_cx.collection.register_fonts(
+            font.data.clone(),
+            Some(parley::fontique::FontInfoOverride {
+                family_name: Some(alias.as_str()),
+                ..Default::default()
+            }),
+        );
+        self.registered_fonts.insert(id);
+        Some(id)
+    }
+
+    /// Deterministic parley family-name alias for a font asset, mirroring the
+    /// `asset_id:{id}` scheme Bevy uses internally.
+    fn font_alias(id: AssetId<Font>) -> String {
+        format!("asset_id:{id:?}")
     }
 
     /// Texture upload is handled by Bevy's `Assets<Image>` directly (the atlas
@@ -397,8 +427,14 @@ mod shaping {
             }
 
             let scale = self.raster_scale;
+
+            // Register the font into our private `font_cx` (once) and target it
+            // by family alias. Bails to the fallback (empty) shape if the asset
+            // isn't loaded yet.
+            let id = self.ensure_font(font_handle, fonts)?;
+
             let mut text_font = TextFont {
-                font: FontSource::Handle(font_handle.clone()),
+                font: FontSource::Family(Self::font_alias(id).into()),
                 font_size: FontSize::Px(font_size),
                 ..default()
             };
@@ -408,10 +444,6 @@ mod shaping {
             if italic {
                 text_font.style = bevy::text::FontStyle::Italic;
             }
-
-            // Bevy requires the resolved font asset to exist; bail to the
-            // fallback shape (empty) if it's not loaded yet.
-            fonts.get(font_handle.id())?;
 
             let entity = Entity::PLACEHOLDER;
             let spans = core::iter::once((
@@ -521,5 +553,32 @@ mod shaping {
                 font_size,
             })
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bevy::asset::Assets;
+
+    // Regression: the crate owns a private parley `FontCx`, so it must register
+    // asset-font bytes into it itself. Without that, `FontSource` resolves to
+    // nothing and headless shaping yields zero glyphs. This proves a real font
+    // shapes to non-empty glyphs with no system fonts / no Bevy plugins.
+    #[test]
+    fn shapes_asset_font_to_glyphs_headless() {
+        let mut images = Assets::<Image>::default();
+        let mut fonts = Assets::<Font>::default();
+        let bytes = include_bytes!("../../../../examples/assets/fonts/FiraMono-Regular.ttf");
+        let handle = fonts.add(Font::from_bytes(bytes.to_vec()));
+
+        let mut atlas = GlyphAtlas::new(&mut images);
+        let shape = atlas.shape_line("Hi", 16.0, Some(&handle), &fonts, &mut images);
+
+        assert!(
+            !shape.glyphs.is_empty(),
+            "asset font should shape to glyphs headlessly, got none"
+        );
+        assert!(shape.width > 0.0, "shaped line should have positive width");
     }
 }
