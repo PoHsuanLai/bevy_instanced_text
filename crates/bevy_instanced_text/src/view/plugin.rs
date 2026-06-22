@@ -52,13 +52,15 @@ struct InstancedTextMeasure {
 }
 
 impl Measure for InstancedTextMeasure {
-    fn measure(&mut self, args: MeasureArgs<'_>, _style: &taffy::Style) -> bevy::math::Vec2 {
+    fn measure(&mut self, args: MeasureArgs<'_>) -> bevy::math::Vec2 {
         use bevy::ui::AvailableSpace;
-        let width = args.width.unwrap_or_else(|| match args.available_width {
-            AvailableSpace::Definite(w) => w.min(self.max_content_width),
-            AvailableSpace::MinContent => self.min_content_width,
-            AvailableSpace::MaxContent => self.max_content_width,
-        });
+        let width = args
+            .known_width
+            .unwrap_or_else(|| match args.available_width {
+                AvailableSpace::Definite(w) => w.min(self.max_content_width),
+                AvailableSpace::MinContent => self.min_content_width,
+                AvailableSpace::MaxContent => self.max_content_width,
+            });
         bevy::math::Vec2::new(width, self.line_height)
     }
 }
@@ -80,10 +82,17 @@ fn intrinsic_widths<T: TextContent>(buffer: &T, cell_px: f32) -> (f32, f32) {
     (max_chars as f32 * cell_px, min_chars as f32 * cell_px)
 }
 
-/// Links a text view to its batch rendering entity. Managed by `update_text_views`.
+/// Links a text view to its batch rendering entities. Managed by
+/// `update_text_views`.
+///
+/// A view emits one batch entity per atlas-texture × painter-tier group
+/// (Bevy 0.19's `FontAtlasSet` shards glyphs into separate textures per
+/// font/size, so a mixed-size view spans several). The entities are listed in
+/// draw order (below → text → above); each carries a `BatchTransform.sub_order`
+/// that preserves that layering on the GPU.
 #[derive(Component, Reflect)]
 #[reflect(Component)]
-pub struct TextViewBatchEntity(pub Entity);
+pub struct TextViewBatchEntity(pub Vec<Entity>);
 
 /// Registers `produce_layouts::<T>` for a specific [`TextContent`] type.
 ///
@@ -267,6 +276,7 @@ pub struct TextViewRow {
     entity: Entity,
     scroll: &'static ScrollPosition,
     computed: &'static ComputedNode,
+    stack_index: &'static bevy::ui::ComputedStackIndex,
     ui_transform: Ref<'static, UiGlobalTransform>,
     clip: Option<&'static CalculatedClip>,
     target_cam: Option<&'static ComputedUiTargetCamera>,
@@ -294,6 +304,7 @@ pub fn update_text_views(
             entity: tv_entity,
             scroll,
             computed,
+            stack_index,
             ui_transform,
             clip,
             target_cam,
@@ -308,19 +319,15 @@ pub fn update_text_views(
             inherited_vis,
         } = row;
         let justify = text_layout.map(|t| t.justify).unwrap_or_default();
-        let regular = atlas.ensure_font(&font.font, &fonts);
-        let bold = faces_cfg
-            .font_bold
-            .as_ref()
-            .and_then(|h| atlas.ensure_font(h, &fonts));
-        let italic = faces_cfg
-            .font_italic
-            .as_ref()
-            .and_then(|h| atlas.ensure_font(h, &fonts));
-        let bold_italic = faces_cfg
-            .font_bold_italic
-            .as_ref()
-            .and_then(|h| atlas.ensure_font(h, &fonts));
+        // Bevy's text pipeline resolves fonts by `Handle<Font>` at shape time;
+        // the renderer just needs the per-axis handles.
+        let regular = match &font.font {
+            bevy::text::FontSource::Handle(h) => Some(h.clone()),
+            _ => Some(Handle::<bevy::text::Font>::default()),
+        };
+        let bold = faces_cfg.font_bold.clone();
+        let italic = faces_cfg.font_italic.clone();
+        let bold_italic = faces_cfg.font_bold_italic.clone();
         let faces = super::render::FontFaces {
             regular,
             bold,
@@ -358,7 +365,7 @@ pub fn update_text_views(
         let composed = ui_affine
             * Affine2::from_translation(-0.5 * size_phys)
             * Affine2::from_scale(Vec2::splat(scale));
-        let batch_transform = BatchTransform {
+        let base_batch_transform = BatchTransform {
             affine: [
                 composed.matrix2.x_axis.x,
                 composed.matrix2.y_axis.x,
@@ -368,11 +375,13 @@ pub fn update_text_views(
                 composed.translation.y,
             ],
             clip: clip.map(|c| c.clip),
-            stack_index: computed.stack_index,
+            stack_index: stack_index.0,
             target_camera: target_cam.and_then(|c| c.get()),
+            // Set per sub-batch below.
+            sub_order: 0.0,
         };
 
-        let instances = {
+        let render_output = {
             let _render_span = bevy::prelude::info_span!("render_layout").entered();
             render_layout(
                 layout,
@@ -381,16 +390,18 @@ pub fn update_text_views(
                 computed,
                 &mut atlas,
                 &fonts,
+                &mut images,
                 super::render::RenderContext {
                     content_start_x,
                     content_end_inset_x,
                     horizontal_scroll_offset: scroll.x,
-                    font_size: font.font_size,
+                    font_size: super::font::font_size_px(font.font_size),
                     faces,
                     justify,
                 },
             )
         };
+        let super::render::RenderOutput { batches } = render_output;
 
         atlas.update_texture(&mut images);
 
@@ -411,37 +422,49 @@ pub fn update_text_views(
             built_at_height: logical.y as u32,
         };
 
-        if instances.is_empty() {
-            if let Some(batch_e) = batch_entity_opt {
-                commands.entity(batch_e.0).insert(Visibility::Hidden);
+        // A view now emits one batch entity per atlas-texture × painter tier
+        // group (`render_layout` returns them in draw order). Despawn last
+        // frame's batch entities and respawn — the group count varies with the
+        // mix of font sizes on screen, so reusing entities 1:1 isn't reliable.
+        let prev_batches = batch_entity_opt.map(|b| b.0.as_slice()).unwrap_or(&[]);
+
+        if batches.is_empty() {
+            for &batch_e in prev_batches {
+                commands.entity(batch_e).insert(Visibility::Hidden);
             }
             continue;
+        }
+
+        for &batch_e in prev_batches {
+            commands.entity(batch_e).despawn();
         }
 
         let layer = render_layers.and_then(|l| {
             (0u8..=31)
                 .find(|&i| l.intersects(&bevy_camera::visibility::RenderLayers::layer(i as usize)))
         });
-        let batch_comp = GlyphBatchComponent {
-            instances,
-            atlas_texture: atlas.texture.clone(),
-            render_layer: layer,
-        };
 
-        if let Some(batch_e) = batch_entity_opt {
-            let mut cmds = commands.entity(batch_e.0);
-            // `Inherited` (not `Visible`) so the parent text-view's
-            // visibility can hide this batch via the propagate cascade.
-            // `Visible` here would override and force-draw regardless
-            // of any ancestor `Visibility::Hidden`.
-            cmds.insert(batch_comp)
-                .insert(batch_transform)
-                .insert(Visibility::Inherited)
-                .insert(batch_data);
-            if let Some(layers) = render_layers {
-                cmds.insert(layers.clone());
-            }
-        } else {
+        // Spacing between sub-batch sort offsets. `stack_z_offsets::TEXT` is
+        // 0.06 and adjacent UI stack indices differ by 1.0, so a tiny step per
+        // sub-batch keeps the whole group inside this view's slot while
+        // preserving below → text → above ordering.
+        const SUB_ORDER_STEP: f32 = 0.0001;
+
+        let mut new_batch_entities = Vec::with_capacity(batches.len());
+        for (i, group) in batches.into_iter().enumerate() {
+            let batch_comp = GlyphBatchComponent {
+                instances: group.instances,
+                // Each group binds exactly the texture its instances sample —
+                // the `FontAtlasSet` texture for glyphs, or the solid texture
+                // for background/overlay quads.
+                atlas_texture: group.texture,
+                render_layer: layer,
+            };
+            let batch_transform = BatchTransform {
+                sub_order: i as f32 * SUB_ORDER_STEP,
+                ..base_batch_transform
+            };
+
             // Parent the batch under the text-view so Bevy's
             // `propagate_visibility` cascade reaches its
             // `InheritedVisibility`. Our custom render-world extract
@@ -452,10 +475,13 @@ pub fn update_text_views(
             // `ViewVisibility`, which is set by `check_visibility`
             // and that system requires `GlobalTransform` (UI nodes
             // have `UiGlobalTransform`, not `GlobalTransform`).
+            //
+            // `Inherited` (not `Visible`) so the parent text-view's
+            // visibility can hide this batch via the propagate cascade.
             let mut entity_cmds = commands.spawn((
                 batch_comp,
                 batch_transform,
-                batch_data,
+                batch_data.clone(),
                 Name::new("TextViewBatch"),
                 Visibility::Inherited,
                 InheritedVisibility::default(),
@@ -464,11 +490,12 @@ pub fn update_text_views(
             if let Some(layers) = render_layers {
                 entity_cmds.insert(layers.clone());
             }
-            let batch_entity = entity_cmds.id();
-            commands
-                .entity(tv_entity)
-                .insert(TextViewBatchEntity(batch_entity));
+            new_batch_entities.push(entity_cmds.id());
         }
+
+        commands
+            .entity(tv_entity)
+            .insert(TextViewBatchEntity(new_batch_entities));
     }
 }
 

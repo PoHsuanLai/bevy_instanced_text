@@ -6,7 +6,7 @@ publish = false
 description = "Examples for bevy_instanced_text and bevy_instanced_text_interaction."
 
 [dependencies]
-bevy = { version = "0.18", default-features = false, features = [
+bevy = { version = "0.19", default-features = false, features = [
     "bevy_render",
     "bevy_core_pipeline",
     "bevy_asset",

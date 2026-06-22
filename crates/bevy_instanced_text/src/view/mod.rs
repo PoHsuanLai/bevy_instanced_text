@@ -15,7 +15,9 @@ pub mod text_style;
 
 pub use bounds::{row_metrics, row_metrics_with_baseline, RowMetrics, RowMetricsParam};
 pub use cursor::{AnchorPoint, BufferAnchorParam};
-pub use font::{resolve_line_height, FontSynthesis, MonoCellWidth, MonoFontFaces};
+pub use font::{
+    font_size_px, resolve_line_height, FontSizePx, FontSynthesis, MonoCellWidth, MonoFontFaces,
+};
 pub use pipeline::DisplayLayout;
 pub use text_access::{visible_buffer_range, LayoutProduceSet};
 

@@ -14,7 +14,7 @@
 use bevy::input::keyboard::{KeyCode, KeyboardInput};
 use bevy::input::mouse::MouseScrollUnit;
 use bevy::input::ButtonState;
-use bevy::input_focus::{FocusedInput, InputFocus};
+use bevy::input_focus::{FocusCause, FocusedInput, InputFocus};
 use bevy::picking::events::{Drag, Pointer, Press, Release, Scroll};
 use bevy::picking::pointer::PointerButton;
 use bevy::prelude::*;
@@ -279,7 +279,10 @@ pub fn on_pointer_scroll<T: TextContent>(
         || keyboard.pressed(KeyCode::SuperRight);
     if scroll_cfg.mouse_wheel_zoom && ctrl_held && dy.abs() > 0.0 {
         let step = dy.signum();
-        font.font_size = (font.font_size + step).clamp(6.0, 96.0);
+        // `TextFont.font_size` is Bevy 0.19's `FontSize` enum; resolve to px,
+        // adjust, and write back as an absolute pixel size.
+        let current = bevy_instanced_text::font_size_px(font.font_size);
+        font.font_size = bevy::text::FontSize::Px((current + step).clamp(6.0, 96.0));
         return;
     }
 
@@ -402,7 +405,7 @@ pub fn on_pointer_press<T: TextContent>(
 
     // Ctrl/Cmd-click is a navigation gesture — let higher-level observers handle it.
     if ctrl_or_cmd_held {
-        input_focus.set(entity);
+        input_focus.set(entity, FocusCause::Pressed);
         return;
     }
 
@@ -459,7 +462,7 @@ pub fn on_pointer_press<T: TextContent>(
     drag_state.drag_start_pos = Some(char_pos);
     drag_state.drag_start_scroll_offset = scroll.y;
     drag_state.last_screen_pos = Some(trigger.event().pointer_location.position);
-    input_focus.set(entity);
+    input_focus.set(entity, FocusCause::Pressed);
 }
 
 /// Per-entity click-gesture tuning. Cascaded onto interactive views via

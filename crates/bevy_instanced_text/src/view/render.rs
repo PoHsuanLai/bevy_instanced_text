@@ -3,12 +3,14 @@
 //!
 //! Pure function over an immutable snapshot: no cursors, selections, syntax
 //! highlighting, or other editor concepts here. The producer (`display_map`)
-//! has already shaped each visible row through cosmic-text and resolved
+//! has already shaped each visible row through Bevy's text pipeline and resolved
 //! per-line/per-run colors into the `ShapedLine.runs`. This module turns
 //! that into per-glyph quads ready for the instanced pipeline.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
+use bevy::asset::AssetId;
 use bevy::prelude::*;
 
 use crate::gpu::GlyphAtlas;
@@ -25,21 +27,21 @@ use bevy::ui::ComputedNode;
 /// `synthesis` permits.
 ///
 /// Built once per text-view per frame in `update_text_views`
-/// from the entity's `TextFont` (each `Handle<Font>` is registered with
-/// the atlas's cosmic-text font system on first use).
-#[derive(Clone, Copy, Debug, Default)]
+/// from the entity's `TextFont`. Each slot is a `Handle<Font>` that Bevy's
+/// text pipeline resolves at shape time.
+#[derive(Clone, Debug, Default)]
 pub struct FontFaces {
-    pub regular: Option<cosmic_text::fontdb::ID>,
-    pub bold: Option<cosmic_text::fontdb::ID>,
-    pub italic: Option<cosmic_text::fontdb::ID>,
-    pub bold_italic: Option<cosmic_text::fontdb::ID>,
+    pub regular: Option<bevy::asset::Handle<bevy::text::Font>>,
+    pub bold: Option<bevy::asset::Handle<bevy::text::Font>>,
+    pub italic: Option<bevy::asset::Handle<bevy::text::Font>>,
+    pub bold_italic: Option<bevy::asset::Handle<bevy::text::Font>>,
     pub synthesis: FontSynthesis,
 }
 
 impl FontFaces {
     /// Single-face shorthand. Bold/italic slots empty, synthesis on.
     /// Used by trivial-layout consumers that don't care about styling.
-    pub fn single(regular: Option<cosmic_text::fontdb::ID>) -> Self {
+    pub fn single(regular: Option<bevy::asset::Handle<bevy::text::Font>>) -> Self {
         Self {
             regular,
             bold: None,
@@ -52,16 +54,17 @@ impl FontFaces {
     /// Resolve a face for a `(bold, italic)` request. Returns the matching
     /// loaded face when available, else falls back to the closest loaded
     /// face on the requested axis (bold-italic → bold → regular, etc.).
-    fn pick(&self, bold: bool, italic: bool) -> Option<cosmic_text::fontdb::ID> {
+    fn pick(&self, bold: bool, italic: bool) -> Option<bevy::asset::Handle<bevy::text::Font>> {
         match (bold, italic) {
             (true, true) => self
                 .bold_italic
-                .or(self.bold)
-                .or(self.italic)
-                .or(self.regular),
-            (true, false) => self.bold.or(self.regular),
-            (false, true) => self.italic.or(self.regular),
-            (false, false) => self.regular,
+                .clone()
+                .or_else(|| self.bold.clone())
+                .or_else(|| self.italic.clone())
+                .or_else(|| self.regular.clone()),
+            (true, false) => self.bold.clone().or_else(|| self.regular.clone()),
+            (false, true) => self.italic.clone().or_else(|| self.regular.clone()),
+            (false, false) => self.regular.clone(),
         }
     }
 
@@ -118,7 +121,7 @@ pub struct GlyphInstance {
     pub _padding: [f32; 2],
 }
 
-#[derive(Component)]
+#[derive(Component, Clone)]
 pub struct TextViewBatch {
     pub built_at_scroll: f32,
     pub built_at_horizontal_scroll: f32,
@@ -153,6 +156,14 @@ pub struct BatchTransform {
     pub clip: Option<Rect>,
     pub stack_index: u32,
     pub target_camera: Option<Entity>,
+    /// Sub-ordering within a single text view's `stack_index`. One text view
+    /// now emits several batch entities (one per atlas texture × painter
+    /// tier), all sharing the same `stack_index`. This monotonically
+    /// increasing offset (assigned in draw order: below → text → above) is
+    /// folded into the GPU sort key so the sub-batches keep their relative
+    /// layering regardless of ECS query order. Kept tiny (≪ 1.0) so it never
+    /// crosses into an adjacent UI element's stack index.
+    pub sub_order: f32,
 }
 
 pub struct RenderContext {
@@ -161,14 +172,111 @@ pub struct RenderContext {
     /// to stop before the right padding boundary.
     pub content_end_inset_x: f32,
     pub horizontal_scroll_offset: f32,
+    /// Logical font size in pixels (resolved from `TextFont.font_size`).
     pub font_size: f32,
     pub faces: FontFaces,
     pub justify: bevy::text::Justify,
 }
 
+/// The painter's tier a [`GlyphBatch`] belongs to. The renderer layers
+/// `Below` (selection/line backgrounds) under `Text` (glyphs + per-run
+/// backgrounds + decorations) under `Above` (carets, brackets). Sub-batches
+/// must preserve this relative ordering even when each tier spans several
+/// atlas textures, so the consumer drives the GPU sort key off this rank.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BatchTier {
+    Below,
+    Text,
+    Above,
+}
+
+impl BatchTier {
+    /// Monotonic rank used to order tiers when composing the final draw
+    /// sequence: lower draws first (further back).
+    pub fn rank(self) -> u8 {
+        match self {
+            BatchTier::Below => 0,
+            BatchTier::Text => 1,
+            BatchTier::Above => 2,
+        }
+    }
+}
+
+/// One sub-batch: a run of [`GlyphInstance`]s that all sample a single atlas
+/// texture, tagged with the painter's [`BatchTier`] they belong to.
+///
+/// Bevy 0.19's `FontAtlasSet` shards glyphs into a separate texture per
+/// `(font, size, …)`, so a view that mixes sizes (headings, `font_scale`
+/// runs) produces glyphs across several textures. Each distinct texture
+/// becomes its own batch — one bound texture, one draw — so every glyph
+/// samples the texture it was actually rasterized into.
+pub struct GlyphBatch {
+    pub tier: BatchTier,
+    pub texture: Handle<Image>,
+    pub instances: Vec<GlyphInstance>,
+}
+
+/// Output of [`render_layout`]: the glyph + overlay instances split into
+/// per-texture sub-batches.
+///
+/// Each [`GlyphBatch`] binds exactly one atlas texture. Solid quads
+/// (selection / line / run backgrounds, overlays, decorations) form their
+/// own batch bound to the atlas's tiny solid texture; glyph quads are
+/// grouped by the `FontAtlasSet` texture they were rasterized into. The
+/// batches are returned in draw order: all `Below` first, then `Text`,
+/// then `Above`.
+pub struct RenderOutput {
+    pub batches: Vec<GlyphBatch>,
+}
+
+/// Per-texture instance buckets for one painter's tier.
+///
+/// Glyph instances are grouped by the `AssetId<Image>` of the atlas texture
+/// they sample. Solid quads (backgrounds, overlays, decorations) all land in
+/// the bucket keyed by the atlas's solid texture. Each bucket carries the
+/// strong `Handle<Image>` so the final batch can bind it. Insertion order is
+/// preserved (`order`) so the painter's sequence within a tier is stable —
+/// the solid texture is inserted first by the caller so backgrounds emitted
+/// before glyphs keep drawing under them.
+#[derive(Default)]
+struct TierBucket {
+    by_texture: HashMap<AssetId<Image>, (Handle<Image>, Vec<GlyphInstance>)>,
+    order: Vec<AssetId<Image>>,
+}
+
+impl TierBucket {
+    /// Append `inst` to the bucket for `texture`, registering the texture's
+    /// strong handle on first sight.
+    fn push(&mut self, texture: AssetId<Image>, handle: &Handle<Image>, inst: GlyphInstance) {
+        let entry = self.by_texture.entry(texture).or_insert_with(|| {
+            self.order.push(texture);
+            (handle.clone(), Vec::new())
+        });
+        entry.1.push(inst);
+    }
+
+    /// Drain into `GlyphBatch`es tagged with `tier`, preserving insertion order
+    /// and dropping empty buckets.
+    fn into_batches(self, tier: BatchTier, out: &mut Vec<GlyphBatch>) {
+        let mut by_texture = self.by_texture;
+        for id in self.order {
+            if let Some((handle, instances)) = by_texture.remove(&id) {
+                if !instances.is_empty() {
+                    out.push(GlyphBatch {
+                        tier,
+                        texture: handle,
+                        instances,
+                    });
+                }
+            }
+        }
+    }
+}
+
 /// Render a `DisplayLayout` into glyph instances.
 ///
 /// `below` is painted before glyphs (selections, backgrounds); `above` after (carets, brackets).
+#[allow(clippy::too_many_arguments)]
 pub fn render_layout(
     layout: &DisplayLayout,
     below: &[RectOverlay],
@@ -176,8 +284,9 @@ pub fn render_layout(
     viewport: &ComputedNode,
     atlas: &mut GlyphAtlas,
     fonts: &bevy::asset::Assets<bevy::text::Font>,
+    images: &mut bevy::asset::Assets<Image>,
     ctx: RenderContext,
-) -> Vec<GlyphInstance> {
+) -> RenderOutput {
     let RenderContext {
         content_start_x,
         content_end_inset_x,
@@ -204,9 +313,16 @@ pub fn render_layout(
     // Per-row overrides: `ShapedLine.line_height = Some(h)` lets a row paint
     // taller / shorter than the layout default (markdown headings, code blocks).
 
-    let mut text_instances: Vec<GlyphInstance> = Vec::with_capacity(layout.lines.len() * 80);
-    let mut below_instances: Vec<GlyphInstance> = Vec::new();
-    let mut above_instances: Vec<GlyphInstance> = Vec::new();
+    // Per-tier, per-texture buckets. Seed each tier's solid texture first so
+    // that solid quads (backgrounds, overlays, decorations) draw under the
+    // glyphs emitted into the same tier and the solid group stays at a stable
+    // position in the painter's sequence.
+    let solid_uv = atlas.solid_uv;
+    let solid_id = atlas.texture.id();
+    let solid_handle = atlas.texture.clone();
+    let mut text_bucket = TierBucket::default();
+    let mut below_bucket = TierBucket::default();
+    let mut above_bucket = TierBucket::default();
 
     // Below-text overlays first (selection bg, line highlight)
     for rect in below {
@@ -215,8 +331,10 @@ pub fn render_layout(
             layout,
             base_line_start_x,
             logical.x,
-            atlas.solid_uv,
-            &mut below_instances,
+            solid_uv,
+            solid_id,
+            &solid_handle,
+            &mut below_bucket,
         );
     }
 
@@ -230,10 +348,14 @@ pub fn render_layout(
             .as_ref()
             .map_or(line.text.len() as f32 * char_width, |s| s.width);
         let justify_offset = match justify {
-            bevy::text::Justify::Left => 0.0,
+            // `Start`/`Justified` treated as left; RTL not handled by this engine.
+            bevy::text::Justify::Left
+            | bevy::text::Justify::Start
+            | bevy::text::Justify::Justified => 0.0,
             bevy::text::Justify::Center => (content_width - line_width).max(0.0) * 0.5,
-            bevy::text::Justify::Right => (content_width - line_width).max(0.0),
-            bevy::text::Justify::Justified => 0.0, // word spacing not supported; treat as left
+            bevy::text::Justify::Right | bevy::text::Justify::End => {
+                (content_width - line_width).max(0.0)
+            }
         };
         let line_x = base_line_start_x + line.x_offset + justify_offset;
 
@@ -253,17 +375,21 @@ pub fn render_layout(
                 .filter(|r| r.bg == Some(bg))
                 .map(|r| r.corner_radius)
                 .fold(0.0_f32, f32::max);
-            below_instances.push(GlyphInstance {
-                position: Vec2::new(margin + bg_x_start, line.y_top),
-                uv_min: atlas.solid_uv.uv_min,
-                uv_max: atlas.solid_uv.uv_max,
-                size: Vec2::new(logical.x - margin * 2.0 - bg_x_start, line_height),
-                color: linear_rgba(bg),
-                z_index: 0.0,
-                corner_radii: [line_corner_radius; 4],
-                skew: 0.0,
-                _padding: [0.0; 2],
-            });
+            below_bucket.push(
+                solid_id,
+                &solid_handle,
+                GlyphInstance {
+                    position: Vec2::new(margin + bg_x_start, line.y_top),
+                    uv_min: solid_uv.uv_min,
+                    uv_max: solid_uv.uv_max,
+                    size: Vec2::new(logical.x - margin * 2.0 - bg_x_start, line_height),
+                    color: linear_rgba(bg),
+                    z_index: 0.0,
+                    corner_radii: [line_corner_radius; 4],
+                    skew: 0.0,
+                    _padding: [0.0; 2],
+                },
+            );
         }
 
         // Pre-compose the row anchor; threads through every emitter call.
@@ -297,7 +423,7 @@ pub fn render_layout(
                     anchor,
                     style,
                     atlas,
-                    &mut text_instances,
+                    &mut text_bucket,
                 );
             } else {
                 emit_unshaped_run_glyphs(
@@ -307,7 +433,7 @@ pub fn render_layout(
                         anchor,
                         style,
                         face: RunFace {
-                            id: faces.regular,
+                            id: faces.regular.clone(),
                             bold: false,
                             italic: false,
                         },
@@ -315,7 +441,9 @@ pub fn render_layout(
                         seg_font_size: font_size,
                     },
                     atlas,
-                    &mut text_instances,
+                    fonts,
+                    images,
+                    &mut text_bucket,
                 );
             }
         } else {
@@ -332,7 +460,7 @@ pub fn render_layout(
                 let (synth_bold, synth_italic) = faces.needs_synth(bold, italic);
                 let face = RunFace {
                     id: if let Some(ref handle) = run.font {
-                        atlas.ensure_font(handle, fonts)
+                        Some(handle.clone())
                     } else {
                         faces.pick(bold, italic)
                     },
@@ -388,10 +516,12 @@ pub fn render_layout(
                                 color: bg,
                             },
                             atlas,
+                            fonts,
+                            images,
                             shape_usable,
                             RenderTargets {
-                                below: &mut below_instances,
-                                text: &mut text_instances,
+                                below: &mut below_bucket,
+                                text: &mut text_bucket,
                             },
                         );
                     } else {
@@ -400,8 +530,10 @@ pub fn render_layout(
                             run,
                             paint,
                             atlas,
+                            fonts,
+                            images,
                             shape_usable,
-                            &mut text_instances,
+                            &mut text_bucket,
                         );
                     }
                 } else {
@@ -410,8 +542,10 @@ pub fn render_layout(
                         run,
                         paint,
                         atlas,
+                        fonts,
+                        images,
                         shape_usable,
-                        &mut text_instances,
+                        &mut text_bucket,
                     );
                 }
 
@@ -426,8 +560,10 @@ pub fn render_layout(
                             x_start: seg_x_start,
                             x_end: seg_x_end,
                         },
-                        atlas.solid_uv,
-                        &mut text_instances,
+                        solid_uv,
+                        solid_id,
+                        &solid_handle,
+                        &mut text_bucket,
                     );
                 }
             }
@@ -441,16 +577,23 @@ pub fn render_layout(
             layout,
             base_line_start_x,
             logical.x,
-            atlas.solid_uv,
-            &mut above_instances,
+            solid_uv,
+            solid_id,
+            &solid_handle,
+            &mut above_bucket,
         );
     }
 
-    // Painter's order: below → text → above
-    let mut out = below_instances;
-    out.append(&mut text_instances);
-    out.append(&mut above_instances);
-    out
+    // Painter's order: all below batches → all text batches → all above
+    // batches. Each tier may span several atlas textures; ordering the tiers
+    // here keeps backgrounds under text and overlays/carets over it even
+    // though they are now separate per-texture draws.
+    let mut batches = Vec::new();
+    below_bucket.into_batches(BatchTier::Below, &mut batches);
+    text_bucket.into_batches(BatchTier::Text, &mut batches);
+    above_bucket.into_batches(BatchTier::Above, &mut batches);
+
+    RenderOutput { batches }
 }
 
 /// Pixel offset of `byte` within `line.text`. Uses shaped advances when present
@@ -503,22 +646,24 @@ fn glyph_quad(
     }
 }
 
-/// Emit a glyph (and its synthetic-bold twin if requested) into `out`.
+/// Emit a glyph (and its synthetic-bold twin if requested) into the bucket for
+/// its atlas `texture`. `handle` is the texture's strong handle.
 fn push_glyph(
     info: crate::gpu::GlyphInfo,
+    texture: AssetId<Image>,
+    handle: &Handle<Image>,
     pen_x: f32,
     anchor: RowAnchor,
     style: RunStyle,
-    out: &mut Vec<GlyphInstance>,
+    out: &mut TierBucket,
 ) {
-    out.push(glyph_quad(info, pen_x, anchor, style));
+    out.push(texture, handle, glyph_quad(info, pen_x, anchor, style));
     if style.stroke_offset_px > 0.0 {
-        out.push(glyph_quad(
-            info,
-            pen_x + style.stroke_offset_px,
-            anchor,
-            style,
-        ));
+        out.push(
+            texture,
+            handle,
+            glyph_quad(info, pen_x + style.stroke_offset_px, anchor, style),
+        );
     }
 }
 
@@ -530,16 +675,20 @@ fn emit_shaped_run_glyphs(
     anchor: RowAnchor,
     style: RunStyle,
     atlas: &mut GlyphAtlas,
-    out: &mut Vec<GlyphInstance>,
+    out: &mut TierBucket,
 ) {
     for g in glyphs {
         if g.byte_index < range.start || g.byte_index >= range.end {
             continue;
         }
+        let texture = g.cache_key.texture;
         let Some((info, _)) = atlas.get_or_rasterize_glyph(g.cache_key) else {
             continue;
         };
-        push_glyph(info, g.x, anchor, style, out);
+        let Some(handle) = atlas.atlas_image_handle(texture) else {
+            continue;
+        };
+        push_glyph(info, texture, &handle, g.x, anchor, style, out);
     }
 }
 
@@ -548,9 +697,9 @@ fn emit_shaped_run_glyphs(
 /// (or the run's explicit font), and the shaper re-applies the flags to select
 /// the matching style within that face. Bundled so the emit functions take one
 /// argument instead of three.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct RunFace {
-    id: Option<cosmic_text::fontdb::ID>,
+    id: Option<bevy::asset::Handle<bevy::text::Font>>,
     bold: bool,
     italic: bool,
 }
@@ -561,7 +710,7 @@ struct RunFace {
 /// (may differ from the line default under a `font_scale` run); `seg_x_start`
 /// is the run's pen-x relative to the line origin. Computed once per run and
 /// threaded through the emit functions so their signatures stay legible.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct RunPaint {
     anchor: RowAnchor,
     style: RunStyle,
@@ -585,8 +734,8 @@ struct BgBand {
 /// sit under the glyphs, `text` for the glyphs themselves. Painter's order is
 /// applied later by the caller.
 struct RenderTargets<'a> {
-    below: &'a mut Vec<GlyphInstance>,
-    text: &'a mut Vec<GlyphInstance>,
+    below: &'a mut TierBucket,
+    text: &'a mut TierBucket,
 }
 
 /// Emit glyphs for a byte range by shaping it on demand. Used when no
@@ -601,7 +750,9 @@ fn emit_unshaped_run_glyphs(
     range: std::ops::Range<usize>,
     paint: RunPaint,
     atlas: &mut GlyphAtlas,
-    out: &mut Vec<GlyphInstance>,
+    fonts: &bevy::asset::Assets<bevy::text::Font>,
+    images: &mut bevy::asset::Assets<Image>,
+    out: &mut TierBucket,
 ) {
     let Some(slice) = line.text.get(range) else {
         return;
@@ -610,16 +761,24 @@ fn emit_unshaped_run_glyphs(
     let shape = atlas.shape_line_styled(
         shape_text,
         paint.seg_font_size,
-        paint.face.id,
+        paint.face.id.as_ref(),
         paint.face.bold,
         paint.face.italic,
+        fonts,
+        images,
     );
     for g in &shape.glyphs {
+        let texture = g.cache_key.texture;
         let Some((info, _)) = atlas.get_or_rasterize_glyph(g.cache_key) else {
+            continue;
+        };
+        let Some(handle) = atlas.atlas_image_handle(texture) else {
             continue;
         };
         push_glyph(
             info,
+            texture,
+            &handle,
             paint.seg_x_start + g.x,
             paint.anchor,
             paint.style,
@@ -632,12 +791,15 @@ fn emit_unshaped_run_glyphs(
 /// emit the glyphs. Using advance bounds (not ink bounds) means the chip
 /// extends to the same edges as the surrounding text's character cells,
 /// matching how browsers render `<code>` — no side-bearing gap on either side.
+#[allow(clippy::too_many_arguments)]
 fn emit_run_with_bg(
     line: &ShapedLine,
     run: &TextFormat,
     paint: RunPaint,
     band: BgBand,
     atlas: &mut GlyphAtlas,
+    fonts: &bevy::asset::Assets<bevy::text::Font>,
+    images: &mut bevy::asset::Assets<Image>,
     shape_usable: Option<&Arc<super::glyph::LineShape>>,
     targets: RenderTargets,
 ) {
@@ -646,33 +808,51 @@ fn emit_run_with_bg(
     let text_band_above = cap_to_descender * 0.25;
     let band_top_y_off = baseline_y_off - text_band_above;
     let bg_w = (band.seg_x_end - paint.seg_x_start).max(0.0);
+    let solid_id = atlas.texture.id();
+    let solid_handle = atlas.texture.clone();
     // Spans the glyph band, matching `RectOverlay { vertical: Full }`.
-    targets.below.push(GlyphInstance {
-        position: Vec2::new(
-            paint.anchor.line_x + paint.seg_x_start,
-            line.y_top + band_top_y_off - cap_to_descender * 0.5,
-        ),
-        uv_min: atlas.solid_uv.uv_min,
-        uv_max: atlas.solid_uv.uv_max,
-        size: Vec2::new(bg_w, cap_to_descender),
-        color: linear_rgba(band.color),
-        z_index: 0.0,
-        corner_radii: [run.corner_radius; 4],
-        skew: 0.0,
-        _padding: [0.0; 2],
-    });
+    targets.below.push(
+        solid_id,
+        &solid_handle,
+        GlyphInstance {
+            position: Vec2::new(
+                paint.anchor.line_x + paint.seg_x_start,
+                line.y_top + band_top_y_off - cap_to_descender * 0.5,
+            ),
+            uv_min: atlas.solid_uv.uv_min,
+            uv_max: atlas.solid_uv.uv_max,
+            size: Vec2::new(bg_w, cap_to_descender),
+            color: linear_rgba(band.color),
+            z_index: 0.0,
+            corner_radii: [run.corner_radius; 4],
+            skew: 0.0,
+            _padding: [0.0; 2],
+        },
+    );
 
-    emit_run_glyphs_only(line, run, paint, atlas, shape_usable, targets.text);
+    emit_run_glyphs_only(
+        line,
+        run,
+        paint,
+        atlas,
+        fonts,
+        images,
+        shape_usable,
+        targets.text,
+    );
 }
 
 /// Emit just the run's glyphs — shape-or-unshaped path, no bg, no extra work.
+#[allow(clippy::too_many_arguments)]
 fn emit_run_glyphs_only(
     line: &ShapedLine,
     run: &TextFormat,
     paint: RunPaint,
     atlas: &mut GlyphAtlas,
+    fonts: &bevy::asset::Assets<bevy::text::Font>,
+    images: &mut bevy::asset::Assets<Image>,
     shape_usable: Option<&Arc<super::glyph::LineShape>>,
-    out: &mut Vec<GlyphInstance>,
+    out: &mut TierBucket,
 ) {
     if let Some(shape) = shape_usable {
         emit_shaped_run_glyphs(
@@ -684,17 +864,28 @@ fn emit_run_glyphs_only(
             out,
         );
     } else {
-        emit_unshaped_run_glyphs(line, run.byte_range.clone(), paint, atlas, out);
+        emit_unshaped_run_glyphs(
+            line,
+            run.byte_range.clone(),
+            paint,
+            atlas,
+            fonts,
+            images,
+            out,
+        );
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn push_overlay_quad(
     rect: &super::overlay::RectOverlay,
     layout: &DisplayLayout,
     line_start_x: f32,
     viewport_width: f32,
     solid_uv: crate::gpu::GlyphInfo,
-    out: &mut Vec<GlyphInstance>,
+    solid_id: AssetId<Image>,
+    solid_handle: &Handle<Image>,
+    out: &mut TierBucket,
 ) {
     let Some(line) = layout
         .lines
@@ -773,22 +964,26 @@ fn push_overlay_quad(
     let node_x = line_start_x + line.x_offset + x0;
     let node_y = line.y_top + y_off - height * 0.5;
 
-    out.push(GlyphInstance {
-        position: Vec2::new(node_x, node_y),
-        uv_min: solid_uv.uv_min,
-        uv_max: solid_uv.uv_max,
-        size: Vec2::new(width, height),
-        color: linear_rgba(rect.color),
-        z_index: 0.0,
-        corner_radii: [
-            rect.corners.tl,
-            rect.corners.tr,
-            rect.corners.bl,
-            rect.corners.br,
-        ],
-        skew: 0.0,
-        _padding: [0.0; 2],
-    });
+    out.push(
+        solid_id,
+        solid_handle,
+        GlyphInstance {
+            position: Vec2::new(node_x, node_y),
+            uv_min: solid_uv.uv_min,
+            uv_max: solid_uv.uv_max,
+            size: Vec2::new(width, height),
+            color: linear_rgba(rect.color),
+            z_index: 0.0,
+            corner_radii: [
+                rect.corners.tl,
+                rect.corners.tr,
+                rect.corners.bl,
+                rect.corners.br,
+            ],
+            skew: 0.0,
+            _padding: [0.0; 2],
+        },
+    );
 }
 
 /// Pre-multiplied linear RGBA suitable for `GlyphInstance.color`.
@@ -818,7 +1013,9 @@ fn emit_run_decoration(
     fg: Color,
     band: RowBand,
     solid_uv: crate::gpu::GlyphInfo,
-    out: &mut Vec<GlyphInstance>,
+    solid_id: AssetId<Image>,
+    solid_handle: &Handle<Image>,
+    out: &mut TierBucket,
 ) {
     let RowBand {
         anchor,
@@ -840,17 +1037,21 @@ fn emit_run_decoration(
 
     let mut push = |y_off: f32| {
         let node_y = y_top + y_off;
-        out.push(GlyphInstance {
-            position: Vec2::new(node_x, node_y),
-            uv_min: solid_uv.uv_min,
-            uv_max: solid_uv.uv_max,
-            size: Vec2::new(width, thickness),
-            color,
-            z_index: 1.0,
-            corner_radii: [0.0; 4],
-            skew: 0.0,
-            _padding: [0.0; 2],
-        });
+        out.push(
+            solid_id,
+            solid_handle,
+            GlyphInstance {
+                position: Vec2::new(node_x, node_y),
+                uv_min: solid_uv.uv_min,
+                uv_max: solid_uv.uv_max,
+                size: Vec2::new(width, thickness),
+                color,
+                z_index: 1.0,
+                corner_radii: [0.0; 4],
+                skew: 0.0,
+                _padding: [0.0; 2],
+            },
+        );
     };
 
     if decoration.contains(TextDecoration::STRIKETHROUGH) {

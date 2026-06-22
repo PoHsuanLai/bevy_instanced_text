@@ -8,7 +8,8 @@ use bevy::prelude::*;
 use std::ops::Range;
 use std::sync::Arc;
 
-/// One glyph from cosmic-text shaping. Rendered by looking up `cache_key` in the atlas.
+/// One glyph from Bevy's text-pipeline shaping. Rendered by looking up
+/// `cache_key` in the atlas.
 ///
 /// `byte_index` is the cluster-start byte in the parent `ShapedLine.text` — a single
 /// glyph may cover multiple bytes (ligatures, combining marks). Renderer consumers
@@ -21,15 +22,16 @@ pub struct ShapedGlyph {
     /// First byte in `ShapedLine.text` covered by this glyph.
     pub byte_index: usize,
     /// Atlas key — pass to `GlyphAtlas::get_or_rasterize_glyph`.
-    pub cache_key: cosmic_text::CacheKey,
+    pub cache_key: crate::gpu::GlyphKey,
 }
 
-/// Per-line cosmic-text shaping result. Held by `ShapedLine.shape` as `Arc<LineShape>`
-/// so scroll-only frames can reuse the previous frame's shape via `Arc::ptr_eq`.
+/// Per-line shaping result from Bevy's text pipeline. Held by `ShapedLine.shape`
+/// as `Arc<LineShape>` so scroll-only frames can reuse the previous frame's
+/// shape via `Arc::ptr_eq`.
 #[derive(Clone, Debug)]
 pub struct LineShape {
-    /// Shaped glyphs in visual order. Indices align 1:1 with the cosmic-text
-    /// `LayoutLine.glyphs` they were derived from.
+    /// Shaped glyphs in visual order. Indices align 1:1 with the parley
+    /// `PositionedGlyph`s they were derived from.
     pub glyphs: Vec<ShapedGlyph>,
     /// Total advance of the line in pixels — equals last glyph's pen-x + last advance.
     /// Consumed by the display-map producer to drive `ContentMetrics.max_content_width`
@@ -209,7 +211,7 @@ pub struct ShapedLine {
     pub padding_top: f32,
     /// Vertical space in pixels below this row. See `padding_top`.
     pub padding_bottom: f32,
-    /// Per-glyph advances from cosmic-text shaping. `None` = use the layout's
+    /// Per-glyph advances from Bevy text-pipeline shaping. `None` = use the layout's
     /// `char_width` fallback (cheap path for `trivial_layout` consumers like
     /// chat/log demos that don't want to pay shaping cost).
     pub shape: Option<Arc<LineShape>>,

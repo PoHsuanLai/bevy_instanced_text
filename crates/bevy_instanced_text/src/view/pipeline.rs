@@ -8,7 +8,7 @@ use super::glyph::ShapedLine;
 
 /// Per-entity rendering snapshot. Written by `display_map::build_display_layout`
 /// (or `trivial_layout`); read-only for the renderer.
-// Not Reflect: contains Arc<Vec<ShapedLine>> with cosmic_text::CacheKey leaves
+// Not Reflect: contains Arc<Vec<ShapedLine>> with GlyphKey leaves
 // that don't impl Reflect, and would be stale anyway (rebuilt every frame).
 #[derive(Component, Clone)]
 pub struct DisplayLayout {

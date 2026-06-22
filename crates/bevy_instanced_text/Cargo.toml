@@ -1,6 +1,6 @@
 [package]
 name = "bevy_instanced_text"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 authors = ["PoHsuanLai"]
 license = "MIT OR Apache-2.0"
@@ -11,7 +11,7 @@ keywords = ["bevy", "text", "rendering", "gpu", "engine"]
 categories = ["game-development", "rendering"]
 
 [dependencies]
-bevy = { version = "0.18", default-features = false, features = [
+bevy = { version = "0.19", default-features = false, features = [
     "bevy_render",
     "bevy_core_pipeline",
     "bevy_asset",
@@ -24,10 +24,8 @@ bevy = { version = "0.18", default-features = false, features = [
     "bevy_ui",
     "bevy_ui_render",
 ] }
-bevy_camera = "0.18"
+bevy_camera = "0.19"
 taffy = { version = "0.9", default-features = false, features = ["std"] }
 
 bitflags = "2"
-cosmic-text = "0.16"
-swash = "0.2"
 bytemuck = { version = "1.14", features = ["derive"] }

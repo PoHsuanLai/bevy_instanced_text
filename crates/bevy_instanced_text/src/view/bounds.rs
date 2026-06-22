@@ -81,7 +81,7 @@ pub fn row_metrics(
         scroll.x,
         line_height,
         mono,
-        font.font_size * DEFAULT_BASELINE_OFFSET_RATIO,
+        crate::view::font::font_size_px(font.font_size) * DEFAULT_BASELINE_OFFSET_RATIO,
     )
 }
 
@@ -304,10 +304,9 @@ impl RowMetricsRowItem<'_, '_> {
     fn metrics(&self) -> RowMetrics {
         let line_height =
             crate::view::font::resolve_line_height(*self.line_height, self.font.font_size);
-        let baseline = self
-            .layout
-            .map(|l| l.baseline_offset)
-            .unwrap_or(self.font.font_size * DEFAULT_BASELINE_OFFSET_RATIO);
+        let baseline = self.layout.map(|l| l.baseline_offset).unwrap_or(
+            crate::view::font::font_size_px(self.font.font_size) * DEFAULT_BASELINE_OFFSET_RATIO,
+        );
         row_metrics_with_baseline(
             self.computed,
             self.scroll.y,

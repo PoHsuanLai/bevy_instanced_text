@@ -35,7 +35,7 @@ use bevy::{
         renderer::{RenderDevice, RenderQueue},
         sync_world::{MainEntity, RenderEntity},
         texture::GpuImage,
-        view::{ExtractedView, ViewTarget, ViewUniform},
+        view::{ExtractedView, ViewUniform},
         Extract, Render, RenderApp, RenderSystems,
     },
     ui_render::{stack_z_offsets, SetUiViewBindGroup, TransparentUi, UiCameraView},
@@ -98,6 +98,17 @@ impl Plugin for InstancedTextRenderPlugin {
                 ),
             );
     }
+}
+
+// Bevy 0.19 requires `ExtractComponent` types to also be `SyncComponent` so
+// the main-world entity is mirrored into the render world. Both batch
+// components are mirrored 1:1 (their render-world twin carries the same type).
+impl bevy::render::sync_component::SyncComponent for GlyphBatchComponent {
+    type Target = Self;
+}
+
+impl bevy::render::sync_component::SyncComponent for BatchTransform {
+    type Target = Self;
 }
 
 impl ExtractComponent for GlyphBatchComponent {
@@ -327,7 +338,9 @@ fn init_instanced_text_pipeline(mut commands: Commands, asset_server: Res<AssetS
 
 #[derive(Clone, Copy, Hash, PartialEq, Eq)]
 pub struct InstancedTextPipelineKey {
-    pub hdr: bool,
+    /// Color target format of the view this batch renders into. Bevy 0.19 drops
+    /// the `hdr: bool` flag in favor of the view's concrete `target_format`.
+    pub target_format: TextureFormat,
     pub msaa_samples: u32,
 }
 
@@ -384,11 +397,7 @@ impl SpecializedRenderPipeline for InstancedTextPipeline {
             ],
         };
 
-        let format = if key.hdr {
-            ViewTarget::TEXTURE_FORMAT_HDR
-        } else {
-            TextureFormat::bevy_default()
-        };
+        let format = key.target_format;
 
         RenderPipelineDescriptor {
             vertex: VertexState {
@@ -424,7 +433,7 @@ impl SpecializedRenderPipeline for InstancedTextPipeline {
                 mask: !0,
                 alpha_to_coverage_enabled: false,
             },
-            push_constant_ranges: vec![],
+            immediate_size: 0,
             zero_initialize_workgroup_memory: true,
             label: Some("instanced_text_pipeline".into()),
         }
@@ -455,11 +464,14 @@ fn queue_instanced_text(
     let ui_view_keys: Vec<bevy::render::view::RetainedViewEntity> =
         transparent_render_phases.keys().copied().collect();
 
-    let mut by_main_camera: EntityHashMap<(bevy::render::view::RetainedViewEntity, bool)> =
+    let mut by_main_camera: EntityHashMap<(bevy::render::view::RetainedViewEntity, TextureFormat)> =
         EntityHashMap::default();
     for (main_render_entity, ui_camera_view) in &main_views {
         if let Ok(view) = ui_views.get(ui_camera_view.0) {
-            by_main_camera.insert(main_render_entity, (view.retained_view_entity, view.hdr));
+            by_main_camera.insert(
+                main_render_entity,
+                (view.retained_view_entity, view.target_format),
+            );
         }
     }
 
@@ -468,11 +480,11 @@ fn queue_instanced_text(
     // view that has a `TransparentUi` phase. Single-camera apps (the common
     // case) route to the only available view; multi-camera apps overshoot
     // for a frame or two, then converge.
-    let fallback_views: Vec<(bevy::render::view::RetainedViewEntity, bool)> =
+    let fallback_views: Vec<(bevy::render::view::RetainedViewEntity, TextureFormat)> =
         if by_main_camera.is_empty() {
             ui_views
                 .iter()
-                .map(|view| (view.retained_view_entity, view.hdr))
+                .map(|view| (view.retained_view_entity, view.target_format))
                 .filter(|(rve, _)| ui_view_keys.contains(rve))
                 .collect()
         } else {
@@ -484,13 +496,13 @@ fn queue_instanced_text(
             continue;
         }
 
-        let routes: Vec<(bevy::render::view::RetainedViewEntity, bool)> =
+        let routes: Vec<(bevy::render::view::RetainedViewEntity, TextureFormat)> =
             match resolved_cam.and_then(|c| by_main_camera.get(&c.0).copied()) {
                 Some(route) => vec![route],
                 None => fallback_views.clone(),
             };
 
-        for (retained_view, hdr) in routes {
+        for (retained_view, target_format) in routes {
             let Some(transparent_phase) = transparent_render_phases.get_mut(&retained_view) else {
                 continue;
             };
@@ -500,14 +512,14 @@ fn queue_instanced_text(
                 &pipeline_cache,
                 &instanced_text_pipeline,
                 InstancedTextPipelineKey {
-                    hdr,
+                    target_format,
                     msaa_samples: 1,
                 },
             );
 
-            let sort = transform.stack_index as f32 + stack_z_offsets::TEXT;
+            let sort = transform.stack_index as f32 + stack_z_offsets::TEXT + transform.sub_order;
 
-            transparent_phase.add(TransparentUi {
+            transparent_phase.add_transient(TransparentUi {
                 entity: (entity, *main_entity),
                 pipeline: pipeline_id,
                 draw_function,

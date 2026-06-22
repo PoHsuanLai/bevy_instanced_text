@@ -202,7 +202,7 @@ fn build_metrics(
 ) -> RowMetrics {
     let baseline = layout
         .map(|l| l.baseline_offset)
-        .unwrap_or(font.font_size * DEFAULT_BASELINE_OFFSET_RATIO);
+        .unwrap_or(crate::view::font::font_size_px(font.font_size) * DEFAULT_BASELINE_OFFSET_RATIO);
     row_metrics_with_baseline(
         computed,
         scroll_y,

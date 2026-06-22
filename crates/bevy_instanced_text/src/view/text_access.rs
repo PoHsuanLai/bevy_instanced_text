@@ -3,7 +3,7 @@
 //! `produce_layouts` is the engine's per-frame layout system. It walks
 //! every `InstancedText<T>` entity, reads its (optional) [`HiddenLines`] /
 //! [`LineStyles`] / [`TextBounds`] data Components, shapes the visible
-//! window through cosmic-text, and (when soft wrap is enabled) splits long
+//! window through Bevy's text pipeline, and (when soft wrap is enabled) splits long
 //! lines on a pixel-budget boundary into multiple `ShapedLine` rows. The
 //! result is the per-frame `DisplayLayout` consumed by the renderer and by
 //! cursor / selection / overlay producers.
@@ -131,6 +131,7 @@ pub fn produce_layouts<T: TextContent>(
     mut q: Query<LayoutRow<T>, LayoutChanged<T>>,
     mut atlas: ResMut<GlyphAtlas>,
     fonts: Res<Assets<bevy::text::Font>>,
+    mut images: ResMut<Assets<bevy::image::Image>>,
 ) {
     let _span = bevy::prelude::info_span!("produce_layouts").entered();
     for mut row in q.iter_mut() {
@@ -167,6 +168,7 @@ pub fn produce_layouts<T: TextContent>(
             row.styles,
             Some(&mut atlas),
             Some(&fonts),
+            Some(&mut images),
             buffer_lines,
         );
         *row.layout = new_layout;
@@ -193,6 +195,7 @@ pub(crate) fn build_display_layout(
     styles: Option<&LineStyles>,
     atlas: Option<&mut GlyphAtlas>,
     fonts: Option<&Assets<bevy::text::Font>>,
+    mut images: Option<&mut Assets<bevy::image::Image>>,
     buffer_lines: u32,
 ) -> DisplayLayout {
     let TextBounds {
@@ -200,7 +203,8 @@ pub(crate) fn build_display_layout(
         indent_px: wrap_indent_px,
     } = wrap;
     let char_width = mono.px;
-    let baseline_offset = font.font_size * 0.32;
+    let font_size_px = crate::view::font::font_size_px(font.font_size);
+    let baseline_offset = font_size_px * 0.32;
     let total_buffer_lines = buffer.line_count();
 
     let line_visible =
@@ -289,15 +293,28 @@ pub(crate) fn build_display_layout(
             line_text.clone()
         };
 
-        // Shape via cosmic-text when an atlas is available. Strip a trailing
-        // newline first — the rope line includes it, but cosmic-text would
-        // just emit a zero-advance glyph for it.
-        let shape = atlas_opt.as_deref_mut().map(|atlas| {
-            let _shape_span = bevy::prelude::info_span!("shape_line").entered();
-            let shape_text = render_text.strip_suffix('\n').unwrap_or(&render_text);
-            let font_id = fonts.and_then(|fs| atlas.ensure_font(&font.font, fs));
-            Arc::new(atlas.shape_line(shape_text, font.font_size, font_id))
-        });
+        // Shape via Bevy's text pipeline when an atlas, font assets, and the
+        // image store are all available. Strip a trailing newline first — the
+        // rope line includes it, but the shaper would just emit a zero-advance
+        // glyph for it.
+        let font_handle = match &font.font {
+            bevy::text::FontSource::Handle(h) => h.clone(),
+            _ => bevy::asset::Handle::<bevy::text::Font>::default(),
+        };
+        let shape = match (atlas_opt.as_deref_mut(), fonts, images.as_deref_mut()) {
+            (Some(atlas), Some(fs), Some(imgs)) => {
+                let _shape_span = bevy::prelude::info_span!("shape_line").entered();
+                let shape_text = render_text.strip_suffix('\n').unwrap_or(&render_text);
+                Some(Arc::new(atlas.shape_line(
+                    shape_text,
+                    font_size_px,
+                    Some(&font_handle),
+                    fs,
+                    imgs,
+                )))
+            }
+            _ => None,
+        };
 
         // Track the widest shaped line so far so external scroll UI can read
         // a real pixel extent rather than guessing from char counts.
@@ -335,10 +352,7 @@ pub(crate) fn build_display_layout(
                     let row_shape = Arc::new(LineShape {
                         glyphs: row.glyphs.clone(),
                         width: row.width,
-                        font_size: shape
-                            .as_ref()
-                            .map(|s| s.font_size)
-                            .unwrap_or(font.font_size),
+                        font_size: shape.as_ref().map(|s| s.font_size).unwrap_or(font_size_px),
                     });
                     shaped_lines.push(ShapedLine {
                         display_row: current_display_row,
@@ -664,6 +678,7 @@ mod tests {
             None,
             None,
             None,
+            None,
             VIEWPORT_BUFFER_LINES,
         )
     }
@@ -861,6 +876,7 @@ mod tests {
             Color::WHITE,
             None,
             Some(&styles),
+            None,
             None,
             None,
             VIEWPORT_BUFFER_LINES,

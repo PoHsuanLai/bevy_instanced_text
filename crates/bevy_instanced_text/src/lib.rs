@@ -1,7 +1,8 @@
 //! GPU-accelerated text rendering engine for Bevy.
 //!
-//! Rasterizes glyphs via [cosmic-text](https://docs.rs/cosmic-text), shapes
-//! lines, and issues one instanced GPU draw call per text view. The crate is
+//! Shapes lines and rasterizes glyphs by driving Bevy's built-in text pipeline
+//! (`TextPipeline` / `FontAtlasSet`, backed by [parley](https://docs.rs/parley)),
+//! then issues one instanced GPU draw call per text view. The crate is
 //! pure rendering infrastructure — it owns no cursor, no selection, no input
 //! handling, and no application-level concepts. Feed it styled text; it draws it.
 //!

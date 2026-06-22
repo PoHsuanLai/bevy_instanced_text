@@ -101,10 +101,45 @@ impl Default for MonoCellWidth {
 
 /// Convenience: resolve `LineHeight` to pixels given a `font_size`.
 /// Mirrors `bevy::text::LineHeight` semantics without touching the private `eval` method.
+///
+/// `font_size` accepts anything convertible into pixels via [`font_size_px`] —
+/// both a raw `f32` and Bevy 0.19's [`bevy::text::FontSize`] enum.
 #[inline]
-pub fn resolve_line_height(line_height: bevy::text::LineHeight, font_size: f32) -> f32 {
+pub fn resolve_line_height(
+    line_height: bevy::text::LineHeight,
+    font_size: impl Into<FontSizePx>,
+) -> f32 {
+    let font_size = font_size.into().0;
     match line_height {
         bevy::text::LineHeight::Px(px) => px,
         bevy::text::LineHeight::RelativeToFont(scale) => scale * font_size,
     }
+}
+
+/// Newtype wrapper enabling [`resolve_line_height`] to accept both a raw `f32`
+/// and Bevy 0.19's [`bevy::text::FontSize`] enum.
+pub struct FontSizePx(pub f32);
+
+impl From<f32> for FontSizePx {
+    fn from(v: f32) -> Self {
+        FontSizePx(v)
+    }
+}
+
+impl From<bevy::text::FontSize> for FontSizePx {
+    fn from(v: bevy::text::FontSize) -> Self {
+        FontSizePx(font_size_px(v))
+    }
+}
+
+/// Resolve a Bevy 0.19 [`bevy::text::FontSize`] to logical pixels.
+///
+/// Viewport-relative and `Rem` units need a viewport/rem context that the
+/// instanced-text engine doesn't thread through its monospace layout math, so
+/// they're resolved against sensible fallbacks (a 1280×720 viewport, 16 px rem).
+/// `FontSize::Px` — the common case for this engine — is exact.
+#[inline]
+pub fn font_size_px(font_size: bevy::text::FontSize) -> f32 {
+    use bevy::math::Vec2;
+    font_size.eval(Vec2::new(1280.0, 720.0), 16.0)
 }
