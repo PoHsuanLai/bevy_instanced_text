@@ -386,13 +386,19 @@ mod shaping {
                 return (**cached).clone();
             }
 
-            let shape = self
-                .drive_pipeline(text, font_size, &font_handle, bold, italic, fonts, images)
-                .unwrap_or(LineShape {
+            // A `None` here means the font asset has not finished loading, not
+            // that the line shapes to nothing. Return the empty shape for this
+            // frame without caching it, so the line reshapes once the asset
+            // lands — caching it would blank that line for the app's lifetime.
+            let Some(shape) =
+                self.drive_pipeline(text, font_size, &font_handle, bold, italic, fonts, images)
+            else {
+                return LineShape {
                     glyphs: Vec::new(),
                     width: 0.0,
                     font_size,
-                });
+                };
+            };
 
             if self.shape_cache_order.len() >= self.shape_cache_capacity {
                 if let Some(victim) = self.shape_cache_order.pop_front() {

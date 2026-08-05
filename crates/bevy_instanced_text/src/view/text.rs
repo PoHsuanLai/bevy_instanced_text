@@ -28,6 +28,16 @@ pub trait TextContent: Send + Sync + 'static {
     /// Character count of line `i`, excluding the trailing `\n`.
     fn line_len_chars(&self, i: usize) -> usize;
 
+    /// The whole buffer as one `&str`, when it is stored contiguously.
+    ///
+    /// Lets whole-buffer passes walk the text once rather than calling
+    /// [`line`](Self::line) per index, which is O(i) for contiguous types and
+    /// so quadratic over a full scan. Chunked types (ropes, grids) return
+    /// `None` — their `line` is already cheap.
+    fn as_contiguous_str(&self) -> Option<&str> {
+        None
+    }
+
     /// Total character count across all lines (including trailing `\n` chars).
     fn char_count(&self) -> usize {
         (0..self.line_count())
@@ -99,30 +109,28 @@ pub trait TextContent: Send + Sync + 'static {
 /// the slice **includes its trailing `\n`** when one is present. The final
 /// virtual empty line after a trailing newline is reported as `""`.
 fn line_slice(body: &str, i: usize) -> &str {
-    let mut start = 0usize;
-    let mut current_line = 0usize;
     let bytes = body.as_bytes();
-    while start <= bytes.len() {
-        if current_line == i {
-            // Find next '\n' at-or-after `start`; include it in the slice.
-            let rest = &body[start..];
-            let end_byte = match rest.find('\n') {
-                Some(p) => start + p + 1, // include the '\n'
-                None => bytes.len(),
-            };
-            return &body[start..end_byte];
-        }
-        // Advance to the next line start (one past the next '\n').
-        let rest = &body[start..];
-        match rest.find('\n') {
-            Some(p) => {
-                start += p + 1;
-                current_line += 1;
-            }
+    let mut start = 0usize;
+    for _ in 0..i {
+        match memchr(b'\n', &bytes[start..]) {
+            Some(p) => start += p + 1,
             None => return "", // Past the last line
         }
     }
-    ""
+    if start > bytes.len() {
+        return "";
+    }
+    let end = match memchr(b'\n', &bytes[start..]) {
+        Some(p) => start + p + 1, // include the '\n'
+        None => bytes.len(),
+    };
+    &body[start..end]
+}
+
+/// Byte-wise `\n` search. `str::find('\n')` goes through `CharSearcher`, which
+/// is markedly slower than a raw byte scan on the hot measure path.
+fn memchr(needle: u8, haystack: &[u8]) -> Option<usize> {
+    haystack.iter().position(|&b| b == needle)
 }
 
 /// Count lines in a `&str` using the ropey convention: a trailing `\n` adds
@@ -140,6 +148,10 @@ fn line_count_of(body: &str) -> usize {
 impl TextContent for String {
     fn line_count(&self) -> usize {
         line_count_of(self)
+    }
+
+    fn as_contiguous_str(&self) -> Option<&str> {
+        Some(self)
     }
 
     fn line(&self, i: usize) -> Cow<'_, str> {

@@ -71,12 +71,25 @@ impl Measure for InstancedTextMeasure {
 fn intrinsic_widths<T: TextContent>(buffer: &T, cell_px: f32) -> (f32, f32) {
     let mut max_chars = 0usize;
     let mut min_chars = 0usize;
-    for i in 0..buffer.line_count() {
-        let line = buffer.line(i);
-        let trimmed = line.strip_suffix('\n').unwrap_or(&line);
+    let mut measure = |trimmed: &str| {
         max_chars = max_chars.max(trimmed.chars().count());
         for word in trimmed.split([' ', '\t']) {
             min_chars = min_chars.max(word.chars().count());
+        }
+    };
+    // `line(i)` is O(i) for contiguous buffers, so indexing every line in turn
+    // would be quadratic — walk the text once instead when we can borrow it.
+    match buffer.as_contiguous_str() {
+        Some(body) => {
+            for trimmed in body.split('\n') {
+                measure(trimmed);
+            }
+        }
+        None => {
+            for i in 0..buffer.line_count() {
+                let line = buffer.line(i);
+                measure(line.strip_suffix('\n').unwrap_or(&line));
+            }
         }
     }
     (max_chars as f32 * cell_px, min_chars as f32 * cell_px)
@@ -478,13 +491,24 @@ pub fn update_text_views(
             //
             // `Inherited` (not `Visible`) so the parent text-view's
             // visibility can hide this batch via the propagate cascade.
+            //
+            // Seed `InheritedVisibility` from the parent rather than taking
+            // the `false` default: `VisibilityPropagate` and this system both
+            // live in `PostUpdate` with no ordering between them, so a batch
+            // spawned here is extracted at least once before the cascade can
+            // correct it. Defaulting to `false` drops those frames entirely —
+            // the glyphs are built but never reach the GPU.
             let mut entity_cmds = commands.spawn((
                 batch_comp,
                 batch_transform,
                 batch_data.clone(),
                 Name::new("TextViewBatch"),
                 Visibility::Inherited,
-                InheritedVisibility::default(),
+                if inherited_vis.get() {
+                    InheritedVisibility::VISIBLE
+                } else {
+                    InheritedVisibility::HIDDEN
+                },
                 ChildOf(tv_entity),
             ));
             if let Some(layers) = render_layers {
